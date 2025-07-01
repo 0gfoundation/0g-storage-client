@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/0glabs/0g-storage-client/common/parallel"
@@ -57,6 +58,7 @@ func (uploader *segmentUploader) getSegment(segIndex uint64) (bool, *node.Segmen
 	}
 	// fill proof
 	proof := uploader.tree.ProofAt(int(segIndex))
+
 	segWithProof := node.SegmentWithProof{
 		Root:     uploader.tree.Root(),
 		Data:     segment,
@@ -64,6 +66,16 @@ func (uploader *segmentUploader) getSegment(segIndex uint64) (bool, *node.Segmen
 		Proof:    proof,
 		FileSize: uint64(uploader.data.Size()),
 	}
+
+	m, err := json.Marshal(segWithProof)
+	if err != nil {
+		return false, nil, errors.WithMessage(err, "Failed to marshal segment with proof")
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"segment size":        len(segWithProof.Data),
+		"total size in bytes": len(m),
+	}).Debug("Segment with proof prepared for upload")
 	return allDataUploaded, &segWithProof, nil
 }
 
@@ -97,8 +109,15 @@ func (uploader *segmentUploader) ParallelDo(ctx context.Context, routine int, ta
 		"to_node":        uploader.clients[uploadTask.clientIndex].URL(),
 	}).Debug("Segments uploading")
 
+	m, err := json.Marshal(segments)
+	if err != nil {
+		return nil, errors.WithMessage(err, "Failed to marshal segments")
+	}
+
+	logrus.WithField("size of entire segments in bytes", len(m)).Debug("Total size of segments being uploaded")
+
 	for i := 0; i < tooManyDataRetries; i++ {
-		_, err := uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeq(ctx, segments, uploader.txSeq)
+		_, err := uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeqGrpc(ctx, segments, uploader.txSeq)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"taskId":      task,
@@ -177,7 +196,7 @@ func (uploader *fileSegmentUploader) ParallelDo(ctx context.Context, routine int
 
 	// retry logic for segment uploads
 	for i := 0; i < tooManyDataRetries; i++ {
-		_, err := uploader.clients[clientIdx].UploadSegmentsByTxSeq(ctx, segments, uploader.Tx.Seq)
+		_, err := uploader.clients[clientIdx].UploadSegmentsByTxSeqGrpc(ctx, segments, uploader.Tx.Seq)
 		if err == nil || isDuplicateError(err.Error()) {
 			break
 		}

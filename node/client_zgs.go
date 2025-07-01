@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/0glabs/0g-storage-client/common/shard"
+	zgs_grpc "github.com/0glabs/0g-storage-client/node/proto"
 	"github.com/ethereum/go-ethereum/common"
 	providers "github.com/openweb3/go-rpc-provider/provider_wrapper"
 	"github.com/sirupsen/logrus"
@@ -12,6 +13,7 @@ import (
 // ZgsClient RPC Client connected to a 0g storage node's zgs RPC endpoint.
 type ZgsClient struct {
 	*rpcClient
+	grpcClient zgs_grpc.ZgsGrpcServiceClient
 }
 
 // MustNewZgsClient Initalize a zgs client and panic on failure.
@@ -31,7 +33,15 @@ func NewZgsClient(url string, option ...providers.Option) (*ZgsClient, error) {
 		return nil, err
 	}
 
-	return &ZgsClient{client}, nil
+	grpcClient, err := newGrpcClient(url)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ZgsClient{
+		client,
+		grpcClient,
+	}, nil
 }
 
 // MustNewZgsClients Initialize a list of zgs clients and panic on failure.
@@ -85,6 +95,31 @@ func (c *ZgsClient) UploadSegments(ctx context.Context, segments []SegmentWithPr
 // UploadSegmentsByTxSeq Call zgs_uploadSegmentsByTxSeq RPC to upload a slice of segments to the node.
 func (c *ZgsClient) UploadSegmentsByTxSeq(ctx context.Context, segments []SegmentWithProof, txSeq uint64) (int, error) {
 	return providers.CallContext[int](c, ctx, "zgs_uploadSegmentsByTxSeq", segments, txSeq)
+}
+
+func (c *ZgsClient) UploadSegmentsByTxSeqGrpc(ctx context.Context, segments []SegmentWithProof, txSeq uint64) (int, error) {
+	grpcSegs, err := ConvertToGrpcSegments(segments)
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = c.grpcClient.UploadSegmentsByTxSeq(ctx, &zgs_grpc.UploadSegmentsByTxSeqRequest{
+		Segments: grpcSegs,
+		TxSeq:    txSeq,
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return 0, nil
+}
+
+func (c *ZgsClient) Close() {
+	if c.grpcClient != nil {
+		if closer, ok := c.grpcClient.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}
 }
 
 // DownloadSegment Call zgs_downloadSegment RPC to download a segment from the node.
