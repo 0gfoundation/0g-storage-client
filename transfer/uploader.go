@@ -168,6 +168,15 @@ func checkLogExistence(ctx context.Context, clients []*node.ZgsClient, root comm
 	return info, nil
 }
 
+func (uploader *Uploader) Close() {
+	if uploader.clients != nil {
+		for _, client := range uploader.clients {
+			client.Close()
+			client.CloseGrpc()
+		}
+	}
+}
+
 func (uploader *Uploader) WithRoutines(routines int) *Uploader {
 	uploader.routines = routines
 	return uploader
@@ -905,3 +914,4 @@ func (uploader *FileSegmentUploader) newFileSegmentUploader(
 		logger:                uploader.logger,
 	}, nil
 }
+

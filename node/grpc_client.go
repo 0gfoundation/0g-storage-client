@@ -28,11 +28,17 @@ func HTTPToGRPCAddr(httpAddr string) (string, error) {
 	return net.JoinHostPort(host, "50051"), nil
 }
 
-func newGrpcClient(url string) (zgs_grpc.ZgsGrpcServiceClient, error) {
+type grpcClient struct {
+	client zgs_grpc.ZgsGrpcServiceClient
+	close  func()
+}
+
+func newGrpcClient(url string) (*grpcClient, error) {
 	var err error
 	grpcEndpoint := url
 	if strings.HasPrefix(url, "http") {
 		grpcEndpoint, err = HTTPToGRPCAddr(url)
+		logrus.WithField("http_url", url).WithField("grpc_url", grpcEndpoint).Debug("Converting HTTP URL to gRPC URL")
 		if err != nil {
 			return nil, errors.New("failed to convert HTTP address to gRPC address: " + err.Error())
 		}
@@ -41,12 +47,16 @@ func newGrpcClient(url string) (zgs_grpc.ZgsGrpcServiceClient, error) {
 	if err != nil {
 		logrus.Fatalf("Failed to connect to gRPC server at %s: %v", url, err)
 	}
-	defer conn.Close()
 
 	client := zgs_grpc.NewZgsGrpcServiceClient(conn)
 	if client == nil {
 		return nil, errors.New("failed to create gRPC client")
 	}
 
-	return client, nil
+	return &grpcClient{
+		client: client,
+		close: func() {
+			_ = conn.Close()
+		},
+	}, nil
 }

@@ -13,7 +13,7 @@ import (
 // ZgsClient RPC Client connected to a 0g storage node's zgs RPC endpoint.
 type ZgsClient struct {
 	*rpcClient
-	grpcClient zgs_grpc.ZgsGrpcServiceClient
+	*grpcClient
 }
 
 // MustNewZgsClient Initalize a zgs client and panic on failure.
@@ -103,7 +103,7 @@ func (c *ZgsClient) UploadSegmentsByTxSeqGrpc(ctx context.Context, segments []Se
 		return 0, err
 	}
 
-	_, err = c.grpcClient.UploadSegmentsByTxSeq(ctx, &zgs_grpc.UploadSegmentsByTxSeqRequest{
+	_, err = c.grpcClient.client.UploadSegmentsByTxSeq(ctx, &zgs_grpc.UploadSegmentsByTxSeqRequest{
 		Segments: grpcSegs,
 		TxSeq:    txSeq,
 	})
@@ -114,11 +114,9 @@ func (c *ZgsClient) UploadSegmentsByTxSeqGrpc(ctx context.Context, segments []Se
 	return 0, nil
 }
 
-func (c *ZgsClient) Close() {
+func (c *ZgsClient) CloseGrpc() {
 	if c.grpcClient != nil {
-		if closer, ok := c.grpcClient.(interface{ Close() }); ok {
-			closer.Close()
-		}
+		c.grpcClient.close()
 	}
 }
 
