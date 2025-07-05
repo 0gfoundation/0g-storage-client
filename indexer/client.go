@@ -87,7 +87,7 @@ func (c *Client) SelectNodes(ctx context.Context, segNum uint64, expectedReplica
 		if slices.Contains(dropped, shardedNode.URL) {
 			continue
 		}
-		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+		client, err := node.NewZgsClient(node.NodeIpPair{RPC: shardedNode.URL}, c.option.ProviderOption)
 		if err != nil {
 			c.logger.Debugf("failed to initialize client of node %v, dropped.", shardedNode.URL)
 			continue
@@ -102,6 +102,7 @@ func (c *Client) SelectNodes(ctx context.Context, segNum uint64, expectedReplica
 
 		nodes = append(nodes, &shard.ShardedNode{
 			URL:     shardedNode.URL,
+			GrpcURL: shardedNode.GrpcURL,
 			Config:  config,
 			Latency: time.Since(start).Milliseconds(),
 		})
@@ -113,7 +114,10 @@ func (c *Client) SelectNodes(ctx context.Context, segNum uint64, expectedReplica
 	}
 	clients := make([]*node.ZgsClient, len(trusted))
 	for i, shardedNode := range trusted {
-		clients[i], err = node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+		clients[i], err = node.NewZgsClient(node.NodeIpPair{
+			RPC:  shardedNode.URL,
+			GRPC: shardedNode.GrpcURL,
+		}, c.option.ProviderOption)
 		if err != nil {
 			return nil, errors.WithMessage(err, fmt.Sprintf("failed to initialize storage node client with %v", shardedNode.URL))
 		}
@@ -246,7 +250,7 @@ func (c *Client) NewDownloaderFromIndexerNodes(ctx context.Context, root string)
 	}
 	clients := make([]*node.ZgsClient, 0)
 	for _, location := range locations {
-		client, err := node.NewZgsClient(location.URL, c.option.ProviderOption)
+		client, err := node.NewZgsClient(node.NodeIpPair{RPC: location.URL}, c.option.ProviderOption)
 		if err != nil {
 			c.logger.Debugf("failed to initialize client of node %v, dropped.", location.URL)
 			continue

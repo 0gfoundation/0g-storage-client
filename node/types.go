@@ -7,6 +7,8 @@ import (
 	"github.com/0glabs/0g-storage-client/core/merkle"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+
+	zgs_grpc "github.com/0glabs/0g-storage-client/node/proto"
 )
 
 // NetworkProtocolVersion P2P network protocol version.
@@ -166,4 +168,31 @@ func (t TxSeqOrRoot) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(t.Root)
+}
+
+func ConvertToGrpcSegments(segs []SegmentWithProof) ([]*zgs_grpc.SegmentWithProof, error) {
+	pbSegs := make([]*zgs_grpc.SegmentWithProof, len(segs))
+	for i, s := range segs {
+		// convert FileProof
+		lemma := make([][]byte, len(s.Proof.Lemma))
+		for j, h := range s.Proof.Lemma {
+			lemma[j] = h.Bytes() // assuming common.Hash has Bytes() → []byte
+		}
+		path := make([]bool, len(s.Proof.Path))
+		copy(path, s.Proof.Path)
+
+		pbSegs[i] = &zgs_grpc.SegmentWithProof{
+			Root: &zgs_grpc.DataRoot{
+				Value: s.Root.Bytes(), // common.Hash → []byte
+			},
+			Data:  s.Data,
+			Index: s.Index,
+			Proof: &zgs_grpc.FileProof{
+				Lemma: lemma,
+				Path:  path,
+			},
+			FileSize: s.FileSize,
+		}
+	}
+	return pbSegs, nil
 }

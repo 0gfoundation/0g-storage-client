@@ -103,7 +103,7 @@ func newDownloader(args downloadArgument) (transfer.IDownloader, func(), error) 
 		return indexerClient, indexerClient.Close, nil
 	}
 
-	clients := node.MustNewZgsClients(args.nodes, providerOption)
+	clients := node.MustNewZgsClients(args.nodes, nil, providerOption)
 	closer := func() {
 		for _, client := range clients {
 			client.Close()

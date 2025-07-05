@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/0glabs/0g-storage-client/common/blockchain"
-	"github.com/mcuadros/go-defaults"
+	// "github.com/mcuadros/go-defaults"
 	providers "github.com/openweb3/go-rpc-provider/provider_wrapper"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -23,7 +23,6 @@ var (
 		Short: "ZeroGStorage client to interact with ZeroGStorage network",
 		PersistentPreRun: func(*cobra.Command, []string) {
 			initLog()
-			defaults.SetDefaults(&providerOption)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -61,6 +60,17 @@ func initLog() {
 	}
 
 	logrus.SetLevel(level)
+	// // Create log file
+	// file, err := os.OpenFile("rpc.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// if err != nil {
+	// 	logrus.WithError(err).Fatal("Failed to open log file")
+	// }
+	// logrus.SetOutput(file)
+
+	// defaults.SetDefaults(&providerOption)
+	// if providerOption.Logger == nil {
+	// 	providerOption.Logger = logrus.StandardLogger().Writer()
+	// }
 }
 
 // Execute is the command line entrypoint.

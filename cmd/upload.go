@@ -46,6 +46,7 @@ type uploadArgument struct {
 	tags string
 
 	node    []string
+	grpcNode []string
 	indexer string
 
 	expectedReplica uint
@@ -62,6 +63,7 @@ type uploadArgument struct {
 	method       string
 
 	timeout time.Duration
+	useGrpc bool
 }
 
 func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
@@ -70,9 +72,11 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().StringVar(&args.tags, "tags", "0x", "Tags of the file")
 
 	cmd.Flags().StringSliceVar(&args.node, "node", []string{}, "ZeroGStorage storage node URL")
+	cmd.Flags().StringSliceVar(&args.grpcNode, "grpc-node", []string{}, "ZeroGStorage storage node gRPC URL")
 	cmd.Flags().StringVar(&args.indexer, "indexer", "", "ZeroGStorage indexer URL")
-	cmd.MarkFlagsOneRequired("indexer", "node")
+	cmd.MarkFlagsOneRequired("indexer", "node", "grpc-node")
 	cmd.MarkFlagsMutuallyExclusive("indexer", "node")
+	cmd.MarkFlagsMutuallyExclusive("indexer", "grpc-node")
 
 	cmd.Flags().UintVar(&args.expectedReplica, "expected-replica", 1, "expected number of replications to upload")
 
@@ -89,6 +93,7 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().StringVar(&args.method, "method", "min", "method for selecting nodes, can be max, min, random, or positive number, if provided a number, will fail if the requirement cannot be met")
 
 	cmd.Flags().DurationVar(&args.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
+	cmd.Flags().BoolVar(&args.useGrpc, "use-grpc", false, "use grpc for uploading segments, default is false (use http)")
 }
 
 var (
@@ -149,6 +154,7 @@ func upload(*cobra.Command, []string) {
 		NRetries:         uploadArgs.nRetries,
 		Step:             uploadArgs.step,
 		Method:           uploadArgs.method,
+		UseGrpc:          uploadArgs.useGrpc,
 	}
 
 	file, err := core.Open(uploadArgs.file)
@@ -197,7 +203,7 @@ func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3clie
 		return up, indexerClient.Close, nil
 	}
 
-	clients := node.MustNewZgsClients(args.node, providerOption)
+	clients := node.MustNewZgsClients(args.node, args.grpcNode, providerOption)
 	closer := func() {
 		for _, client := range clients {
 			client.Close()

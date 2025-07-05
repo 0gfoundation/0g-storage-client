@@ -26,6 +26,7 @@ type segmentUploader struct {
 	tasks    []*uploadTask
 	taskSize uint
 	logger   *logrus.Logger
+	useGrpc  bool
 }
 
 var _ parallel.Interface = (*segmentUploader)(nil)
@@ -57,6 +58,7 @@ func (uploader *segmentUploader) getSegment(segIndex uint64) (bool, *node.Segmen
 	}
 	// fill proof
 	proof := uploader.tree.ProofAt(int(segIndex))
+
 	segWithProof := node.SegmentWithProof{
 		Root:     uploader.tree.Root(),
 		Data:     segment,
@@ -64,6 +66,7 @@ func (uploader *segmentUploader) getSegment(segIndex uint64) (bool, *node.Segmen
 		Proof:    proof,
 		FileSize: uint64(uploader.data.Size()),
 	}
+
 	return allDataUploaded, &segWithProof, nil
 }
 
@@ -98,14 +101,14 @@ func (uploader *segmentUploader) ParallelDo(ctx context.Context, routine int, ta
 	}).Debug("Segments uploading")
 
 	for i := 0; i < tooManyDataRetries; i++ {
-		_, err := uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeq(ctx, segments, uploader.txSeq)
+		_, err := uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeqChoice(ctx, segments, uploader.txSeq, uploader.useGrpc)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"taskId":      task,
 				"segIndex":    segIndex,
 				"startSegIdx": startSegIndex,
 				"numSegments": numSegments,
-			}).Error("Failed to upload segments", err)
+			}).WithError(err).Error("Failed to upload segments")
 
 		}
 		if err == nil || isDuplicateError(err.Error()) {
@@ -137,6 +140,7 @@ type fileSegmentUploader struct {
 	clients []*node.ZgsClient
 	tasks   [][]*uploadTask
 	logger  *logrus.Logger
+	useGrpc bool
 }
 
 var _ parallel.Interface = (*fileSegmentUploader)(nil)
@@ -177,7 +181,7 @@ func (uploader *fileSegmentUploader) ParallelDo(ctx context.Context, routine int
 
 	// retry logic for segment uploads
 	for i := 0; i < tooManyDataRetries; i++ {
-		_, err := uploader.clients[clientIdx].UploadSegmentsByTxSeq(ctx, segments, uploader.Tx.Seq)
+		_, err := uploader.clients[clientIdx].UploadSegmentsByTxSeqChoice(ctx, segments, uploader.Tx.Seq, uploader.useGrpc)
 		if err == nil || isDuplicateError(err.Error()) {
 			break
 		}
