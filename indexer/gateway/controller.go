@@ -77,7 +77,7 @@ func (ctrl *RestController) getAvailableStorageNodes(ctx context.Context, cid Ci
 
 	for i := range nodes {
 		var client *node.ZgsClient
-		client, err = node.NewZgsClient(nodes[i].URL)
+		client, err = node.NewZgsClient(node.NodeIpPair{ RPC: nodes[i].URL })
 		if err != nil {
 			return nil, errors.WithMessage(err, "failed to create zgs client")
 		}

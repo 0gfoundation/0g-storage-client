@@ -102,6 +102,7 @@ func (c *FileLocationCache) getFileLocation(ctx context.Context, txSeq uint64, c
 		}
 		nodes = append(nodes, &shard.ShardedNode{
 			URL:     v.URL(),
+			GrpcURL: v.GrpcURL(),
 			Config:  config,
 			Latency: time.Since(start).Milliseconds(),
 		})
@@ -140,7 +141,7 @@ func (c *FileLocationCache) getFileLocation(ctx context.Context, txSeq uint64, c
 						continue
 					}
 				}
-				zgsClient, err := node.NewZgsClient(url, defaultZgsClientOpt)
+				zgsClient, err := node.NewZgsClient(node.NodeIpPair{RPC: url}, defaultZgsClientOpt)
 				if err != nil {
 					continue
 				}

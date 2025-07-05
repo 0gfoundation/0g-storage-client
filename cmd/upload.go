@@ -46,6 +46,7 @@ type uploadArgument struct {
 	tags string
 
 	node    []string
+	grpcNode []string
 	indexer string
 
 	expectedReplica uint
@@ -71,9 +72,11 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().StringVar(&args.tags, "tags", "0x", "Tags of the file")
 
 	cmd.Flags().StringSliceVar(&args.node, "node", []string{}, "ZeroGStorage storage node URL")
+	cmd.Flags().StringSliceVar(&args.grpcNode, "grpc-node", []string{}, "ZeroGStorage storage node gRPC URL")
 	cmd.Flags().StringVar(&args.indexer, "indexer", "", "ZeroGStorage indexer URL")
-	cmd.MarkFlagsOneRequired("indexer", "node")
+	cmd.MarkFlagsOneRequired("indexer", "node", "grpc-node")
 	cmd.MarkFlagsMutuallyExclusive("indexer", "node")
+	cmd.MarkFlagsMutuallyExclusive("indexer", "grpc-node")
 
 	cmd.Flags().UintVar(&args.expectedReplica, "expected-replica", 1, "expected number of replications to upload")
 
@@ -200,7 +203,7 @@ func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3clie
 		return up, indexerClient.Close, nil
 	}
 
-	clients := node.MustNewZgsClients(args.node, providerOption)
+	clients := node.MustNewZgsClients(args.node, args.grpcNode, providerOption)
 	closer := func() {
 		for _, client := range clients {
 			client.Close()

@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"net"
+	"net/url"
 
 	"github.com/0glabs/0g-storage-client/common/shard"
 	zgs_grpc "github.com/0glabs/0g-storage-client/node/proto"
@@ -16,40 +18,80 @@ type ZgsClient struct {
 	*grpcClient
 }
 
+type NodeIpPair struct {
+	RPC  string // e.g. "http://1.2.3.4:5678" or "http://1.2.3.4"
+	GRPC string // e.g. "1.2.3.4:50051"
+}
+
+func PairTrustedHTTP(rpcs, grpcs []string) []NodeIpPair {
+	grpcByHost := make(map[string]string, len(grpcs))
+	for _, grpcAddr := range grpcs {
+		host, _, err := net.SplitHostPort(grpcAddr)
+		if err != nil {
+			continue
+		}
+		grpcByHost[host] = grpcAddr
+	}
+
+	var out []NodeIpPair
+	for _, rpcURL := range rpcs {
+		u, err := url.Parse(rpcURL)
+		if err != nil {
+			continue
+		}
+		host := u.Hostname()
+
+		out = append(out, NodeIpPair{
+			RPC:  rpcURL,
+			GRPC: grpcByHost[host],
+		})
+	}
+
+	return out
+}
+
 // MustNewZgsClient Initalize a zgs client and panic on failure.
-func MustNewZgsClient(url string, option ...providers.Option) *ZgsClient {
-	client, err := NewZgsClient(url, option...)
+func MustNewZgsClient(u NodeIpPair, option ...providers.Option) *ZgsClient {
+	client, err := NewZgsClient(u, option...)
 	if err != nil {
-		logrus.WithError(err).WithField("url", url).Fatal("Failed to create zgs client")
+		logrus.WithError(err).WithField("url", u.RPC).Fatal("Failed to create zgs client")
 	}
 
 	return client
 }
 
 // NewZgsClient Initalize a zgs client.
-func NewZgsClient(url string, option ...providers.Option) (*ZgsClient, error) {
-	client, err := newRpcClient(url, option...)
+func NewZgsClient(u NodeIpPair, option ...providers.Option) (*ZgsClient, error) {
+	client, err := newRpcClient(u.RPC, option...)
 	if err != nil {
 		return nil, err
 	}
 
-	grpcClient, err := newGrpcClient(url)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ZgsClient{
+	res := &ZgsClient{
 		client,
-		grpcClient,
-	}, nil
+		nil,
+	}
+
+	if u.GRPC != "" {
+		grpcClient, err := newGrpcClient(u.GRPC)
+		if err != nil {
+			return nil, err
+		}
+		res.grpcClient = grpcClient
+	}
+	// TODO: Can add rpc on node to return grpc information to make the discovered nodes serve grpc requests.
+
+	return res, nil
 }
 
 // MustNewZgsClients Initialize a list of zgs clients and panic on failure.
-func MustNewZgsClients(urls []string, option ...providers.Option) []*ZgsClient {
+func MustNewZgsClients(rpcs, grpcs []string, option ...providers.Option) []*ZgsClient {
 	var clients []*ZgsClient
 
-	for _, url := range urls {
-		client := MustNewZgsClient(url, option...)
+	nodes := PairTrustedHTTP(rpcs, grpcs)
+
+	for _, n := range nodes {
+		client := MustNewZgsClient(n, option...)
 		clients = append(clients, client)
 	}
 
@@ -95,6 +137,13 @@ func (c *ZgsClient) UploadSegments(ctx context.Context, segments []SegmentWithPr
 // UploadSegmentsByTxSeq Call zgs_uploadSegmentsByTxSeq RPC to upload a slice of segments to the node.
 func (c *ZgsClient) UploadSegmentsByTxSeq(ctx context.Context, segments []SegmentWithProof, txSeq uint64) (int, error) {
 	return providers.CallContext[int](c, ctx, "zgs_uploadSegmentsByTxSeq", segments, txSeq)
+}
+
+func (c *ZgsClient) UploadSegmentsByTxSeqChoice(ctx context.Context, segments []SegmentWithProof, txSeq uint64, useGrpc bool) (int, error) {
+	if useGrpc && c.grpcClient != nil {
+		return c.UploadSegmentsByTxSeqGrpc(ctx, segments, txSeq)
+	}
+	return c.UploadSegmentsByTxSeq(ctx, segments, txSeq)
 }
 
 func (c *ZgsClient) UploadSegmentsByTxSeqGrpc(ctx context.Context, segments []SegmentWithProof, txSeq uint64) (int, error) {

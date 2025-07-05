@@ -32,7 +32,8 @@ var (
 )
 
 type NodeManagerConfig struct {
-	TrustedNodes []string
+	TrustedRpcNodes  []string
+	TrustedGrpcNodes []string
 
 	DiscoveryNode     string
 	DiscoveryInterval time.Duration
@@ -59,7 +60,9 @@ func InitDefaultNodeManager(config NodeManagerConfig) (mgr *NodeManager, err err
 	}
 	defaultNodeManager.discoveryPorts = config.DiscoveryPorts
 
-	if err = defaultNodeManager.AddTrustedNodes(config.TrustedNodes...); err != nil {
+	ipPairs := node.PairTrustedHTTP(config.TrustedRpcNodes, config.TrustedGrpcNodes)
+
+	if err = defaultNodeManager.AddTrustedNodes(ipPairs...); err != nil {
 		return nil, errors.WithMessage(err, "Failed to add trusted nodes")
 	}
 
@@ -102,6 +105,7 @@ func (nm *NodeManager) Trusted() ([]*shard.ShardedNode, error) {
 
 		nodes = append(nodes, &shard.ShardedNode{
 			URL:     v.URL(),
+			GrpcURL: v.GrpcURL(),
 			Config:  config,
 			Latency: time.Since(start).Milliseconds(),
 		})
@@ -141,19 +145,19 @@ func parseIP(url string) string {
 }
 
 // AddTrustedNodes add trusted storage nodes.
-func (nm *NodeManager) AddTrustedNodes(nodes ...string) error {
-	for _, v := range nodes {
-		ip := parseIP(v)
+func (nm *NodeManager) AddTrustedNodes(nodes ...node.NodeIpPair) error {
+	for _, n := range nodes {
+		ip := parseIP(n.RPC)
 		if _, err := defaultIPLocationManager.Query(ip); err != nil {
 			logrus.WithError(err).WithField("ip", ip).Warn("Failed to query IP location")
 		}
 
-		client, err := node.NewZgsClient(v)
+		client, err := node.NewZgsClient(n)
 		if err != nil {
-			return errors.WithMessagef(err, "Failed to create zgs client, url = %v", v)
+			return errors.WithMessagef(err, "Failed to create zgs client, url = %v", n.RPC)
 		}
 
-		nm.trusted.LoadOrStore(v, client)
+		nm.trusted.LoadOrStore(n.RPC, client)
 	}
 
 	return nil

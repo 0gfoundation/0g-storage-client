@@ -824,7 +824,7 @@ func (uploader *FileSegmentUploader) Upload(ctx context.Context, fileSeg FileSeg
 		}).Debug("Begin to upload file segments with proof")
 	}
 
-	fsUploader, err := uploader.newFileSegmentUploader(ctx, fileSeg, opt.ExpectedReplica, opt.TaskSize, opt.Method)
+	fsUploader, err := uploader.newFileSegmentUploader(ctx, fileSeg, opt)
 	if err != nil {
 		return err
 	}
@@ -848,7 +848,7 @@ func (uploader *FileSegmentUploader) Upload(ctx context.Context, fileSeg FileSeg
 }
 
 func (uploader *FileSegmentUploader) newFileSegmentUploader(
-	ctx context.Context, fileSeg FileSegmentsWithProof, expectedReplica, taskSize uint, method string) (*fileSegmentUploader, error) {
+	ctx context.Context, fileSeg FileSegmentsWithProof, option UploadOption) (*fileSegmentUploader, error) {
 
 	//  get shard configurations
 	shardConfigs, err := getShardConfigs(ctx, uploader.clients)
@@ -857,7 +857,7 @@ func (uploader *FileSegmentUploader) newFileSegmentUploader(
 	}
 
 	// validate replica requirements
-	if !shard.CheckReplica(shardConfigs, expectedReplica, method) {
+	if !shard.CheckReplica(shardConfigs, option.ExpectedReplica, option.Method) {
 		return nil, fmt.Errorf("selected nodes cannot cover all shards")
 	}
 
@@ -899,9 +899,9 @@ func (uploader *FileSegmentUploader) newFileSegmentUploader(
 	uploadTasks := make([][]*uploadTask, 0, len(clientTasks))
 	for _, tasks := range clientTasks {
 		// split tasks into batches of taskSize
-		for len(tasks) > int(taskSize) {
-			uploadTasks = append(uploadTasks, tasks[:taskSize])
-			tasks = tasks[taskSize:]
+		for len(tasks) > int(option.TaskSize) {
+			uploadTasks = append(uploadTasks, tasks[:option.TaskSize])
+			tasks = tasks[option.TaskSize:]
 		}
 
 		if len(tasks) > 0 {
@@ -915,5 +915,6 @@ func (uploader *FileSegmentUploader) newFileSegmentUploader(
 		clients:               uploader.clients,
 		tasks:                 uploadTasks,
 		logger:                uploader.logger,
+		useGrpc:               option.UseGrpc,
 	}, nil
 }

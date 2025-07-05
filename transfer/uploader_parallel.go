@@ -101,7 +101,7 @@ func (uploader *segmentUploader) ParallelDo(ctx context.Context, routine int, ta
 	}).Debug("Segments uploading")
 
 	for i := 0; i < tooManyDataRetries; i++ {
-		_, err := uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeqGrpc(ctx, segments, uploader.txSeq)
+		_, err := uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeqChoice(ctx, segments, uploader.txSeq, uploader.useGrpc)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"taskId":      task,
@@ -140,6 +140,7 @@ type fileSegmentUploader struct {
 	clients []*node.ZgsClient
 	tasks   [][]*uploadTask
 	logger  *logrus.Logger
+	useGrpc bool
 }
 
 var _ parallel.Interface = (*fileSegmentUploader)(nil)
@@ -180,7 +181,7 @@ func (uploader *fileSegmentUploader) ParallelDo(ctx context.Context, routine int
 
 	// retry logic for segment uploads
 	for i := 0; i < tooManyDataRetries; i++ {
-		_, err := uploader.clients[clientIdx].UploadSegmentsByTxSeqGrpc(ctx, segments, uploader.Tx.Seq)
+		_, err := uploader.clients[clientIdx].UploadSegmentsByTxSeqChoice(ctx, segments, uploader.Tx.Seq, uploader.useGrpc)
 		if err == nil || isDuplicateError(err.Error()) {
 			break
 		}

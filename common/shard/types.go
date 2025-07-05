@@ -34,6 +34,7 @@ func (config *ShardConfig) NextSegmentIndex(startSegmentIndex uint64) uint64 {
 
 type ShardedNode struct {
 	URL    string      `json:"url"`
+	GrpcURL string      `json:"grpcUrl"`
 	Config ShardConfig `json:"config"`
 	// Latency RPC latency in milli seconds.
 	Latency int64 `json:"latency"`

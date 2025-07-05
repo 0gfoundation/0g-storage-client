@@ -29,7 +29,8 @@ var (
 func init() {
 	indexerCmd.Flags().StringVar(&indexerArgs.endpoint, "endpoint", ":12345", "Indexer service endpoint")
 
-	indexerCmd.Flags().StringSliceVar(&indexerArgs.nodes.TrustedNodes, "trusted", nil, "Trusted storage node URLs that separated by comma")
+	indexerCmd.Flags().StringSliceVar(&indexerArgs.nodes.TrustedRpcNodes, "trusted", nil, "Trusted storage node URLs that separated by comma")
+	indexerCmd.Flags().StringSliceVar(&indexerArgs.nodes.TrustedGrpcNodes, "trusted-grpc", nil, "Trusted storage node gRPC URLs that separated by comma")
 	indexerCmd.Flags().StringVar(&indexerArgs.nodes.DiscoveryNode, "node", "", "Storage node to discover peers in P2P network")
 	indexerCmd.Flags().DurationVar(&indexerArgs.nodes.DiscoveryInterval, "discover-interval", 10*time.Minute, "Interval to discover peers in network")
 	indexerCmd.Flags().DurationVar(&indexerArgs.nodes.UpdateInterval, "update-interval", 10*time.Minute, "Interval to update shard config of discovered peers")
@@ -71,7 +72,7 @@ func startIndexer(*cobra.Command, []string) {
 	api := indexer.NewIndexerApi()
 
 	logrus.WithFields(logrus.Fields{
-		"trusted":  len(indexerArgs.nodes.TrustedNodes),
+		"trusted":  len(indexerArgs.nodes.TrustedRpcNodes),
 		"discover": len(indexerArgs.nodes.DiscoveryNode) > 0,
 	}).Info("Starting indexer service ...")
 
