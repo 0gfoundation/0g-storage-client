@@ -26,6 +26,7 @@ type segmentUploader struct {
 	tasks    []*uploadTask
 	taskSize uint
 	logger   *logrus.Logger
+	useGrpc  bool
 }
 
 var _ parallel.Interface = (*segmentUploader)(nil)
@@ -65,7 +66,7 @@ func (uploader *segmentUploader) getSegment(segIndex uint64) (bool, *node.Segmen
 		Proof:    proof,
 		FileSize: uint64(uploader.data.Size()),
 	}
-	
+
 	return allDataUploaded, &segWithProof, nil
 }
 
@@ -107,7 +108,7 @@ func (uploader *segmentUploader) ParallelDo(ctx context.Context, routine int, ta
 				"segIndex":    segIndex,
 				"startSegIdx": startSegIndex,
 				"numSegments": numSegments,
-			}).Error("Failed to upload segments", err)
+			}).WithError(err).Error("Failed to upload segments")
 
 		}
 		if err == nil || isDuplicateError(err.Error()) {

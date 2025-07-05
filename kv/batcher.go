@@ -51,16 +51,18 @@ func (b *Batcher) Exec(ctx context.Context, option ...transfer.UploadOption) (co
 		return common.Hash{}, err
 	}
 
-	// upload file
-	uploader, err := transfer.NewUploader(ctx, b.w3Client, b.clients, zg_common.LogOption{Logger: b.logger})
-	if err != nil {
-		return common.Hash{}, err
-	}
 	var opt transfer.UploadOption
 	if len(option) > 0 {
 		opt = option[0]
 	}
 	opt.Tags = b.buildTags()
+
+	// upload file
+	uploader, err := transfer.NewUploader(ctx, b.w3Client, b.clients, zg_common.LogOption{Logger: b.logger})
+	if err != nil {
+		return common.Hash{}, err
+	}
+
 	txHash, _, err := uploader.Upload(ctx, data, opt)
 	if err != nil {
 		return txHash, errors.WithMessagef(err, "Failed to upload data")

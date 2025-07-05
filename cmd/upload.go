@@ -62,6 +62,7 @@ type uploadArgument struct {
 	method       string
 
 	timeout time.Duration
+	useGrpc bool
 }
 
 func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
@@ -89,6 +90,7 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().StringVar(&args.method, "method", "min", "method for selecting nodes, can be max, min, random, or positive number, if provided a number, will fail if the requirement cannot be met")
 
 	cmd.Flags().DurationVar(&args.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
+	cmd.Flags().BoolVar(&args.useGrpc, "use-grpc", false, "use grpc for uploading segments, default is false (use http)")
 }
 
 var (
@@ -149,6 +151,7 @@ func upload(*cobra.Command, []string) {
 		NRetries:         uploadArgs.nRetries,
 		Step:             uploadArgs.step,
 		Method:           uploadArgs.method,
+		UseGrpc:          uploadArgs.useGrpc,
 	}
 
 	file, err := core.Open(uploadArgs.file)
