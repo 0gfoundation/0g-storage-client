@@ -93,6 +93,7 @@ func download(*cobra.Command, []string) {
 func newDownloader(args downloadArgument) (transfer.IDownloader, func(), error) {
 	if args.indexer != "" {
 		indexerClient, err := indexer.NewClient(args.indexer, indexer.IndexerClientOption{
+			FullTrusted:    false,
 			ProviderOption: providerOption,
 			LogOption:      common.LogOption{Logger: logrus.StandardLogger()},
 		})

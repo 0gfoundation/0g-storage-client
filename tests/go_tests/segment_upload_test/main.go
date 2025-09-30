@@ -94,7 +94,7 @@ func runTest() error {
 		return errors.WithMessage(err, "failed to initialize indexer client")
 	}
 	defer indexerClient.Close()
-	uploader, err := indexerClient.NewUploaderFromIndexerNodes(ctx, data.NumSegments(), w3client, 1, nil, "min")
+	uploader, err := indexerClient.NewUploaderFromIndexerNodes(ctx, data.NumSegments(), w3client, 1, nil, "min", true)
 	if err != nil {
 		return errors.WithMessage(err, "failed to initialize uploader")
 	}
@@ -136,7 +136,7 @@ waitLoop:
 	if err := indexerClient.UploadFileSegments(ctx, transfer.FileSegmentsWithProof{
 		Segments: segments,
 		FileInfo: info,
-	}, transfer.UploadOption{Method: "min"}); err != nil {
+	}, transfer.UploadOption{Method: "min", FullTrusted: true}); err != nil {
 		return errors.WithMessage(err, "failed to upload file segments")
 	}
 

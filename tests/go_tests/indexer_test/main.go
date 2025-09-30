@@ -42,6 +42,7 @@ func runTest() error {
 	if _, err := indexerClient.Upload(ctx, w3client, data, transfer.UploadOption{
 		FinalityRequired: transfer.FileFinalized,
 		Method:           "min",
+		FullTrusted:      true,
 	}); err != nil {
 		return errors.WithMessage(err, "failed to upload file")
 	}
@@ -71,7 +72,7 @@ func runTest() error {
 		defer client.Close()
 	}
 
-	uploader, err := transfer.NewUploader(ctx, w3client, clients, common.LogOption{Logger: logrus.StandardLogger()})
+	uploader, err := transfer.NewUploader(ctx, w3client, &transfer.SelectedNodes{Trusted: clients}, common.LogOption{Logger: logrus.StandardLogger()})
 	if err != nil {
 		return errors.WithMessage(err, "failed to initialize uploader")
 	}

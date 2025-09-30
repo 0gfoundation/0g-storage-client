@@ -52,6 +52,12 @@ const (
 	TransactionPacked                            // wait for transaction packed
 )
 
+// SelectedNodes holds the selected trusted and discovered nodes.
+type SelectedNodes struct {
+	Trusted    []*node.ZgsClient
+	Discovered []*node.ZgsClient
+}
+
 // UploadOption upload option for a file
 type UploadOption struct {
 	Tags             []byte              // transaction tags
@@ -65,6 +71,7 @@ type UploadOption struct {
 	NRetries         int                 // number of retries for uploading
 	Step             int64               // step for uploading
 	Method           string              // method for selecting nodes, can be "max", "random" or certain positive number in string
+	FullTrusted      bool                // whether to use full trusted nodes
 }
 
 // BatchUploadOption upload option for a batching
@@ -76,6 +83,7 @@ type BatchUploadOption struct {
 	Step        int64          // step for uploading
 	TaskSize    uint           // number of files to upload simutanously
 	Method      string         // method for selecting nodes, can be "max", "random" or certain positive number in string
+	FullTrusted bool           // whether to use full trusted nodes
 	DataOptions []UploadOption // upload option for single file, nonce and fee are ignored
 }
 
@@ -92,7 +100,7 @@ type SubmitLogEntryOption struct {
 type Uploader struct {
 	flow     *contract.FlowContract // flow contract instance
 	market   *contract.Market       // market contract instance
-	clients  []*node.ZgsClient      // 0g storage clients
+	clients  *SelectedNodes         // 0g storage clients
 	routines int                    // number of go routines for uploading
 	logger   *logrus.Logger         // logger
 }
@@ -113,14 +121,14 @@ func getShardConfigs(ctx context.Context, clients []*node.ZgsClient) ([]*shard.S
 }
 
 // NewUploader Initialize a new uploader.
-func NewUploader(ctx context.Context, w3Client *web3go.Client, clients []*node.ZgsClient, opts ...zg_common.LogOption) (*Uploader, error) {
-	if len(clients) == 0 {
+func NewUploader(ctx context.Context, w3Client *web3go.Client, clients *SelectedNodes, opts ...zg_common.LogOption) (*Uploader, error) {
+	if len(clients.Trusted) == 0 && len(clients.Discovered) == 0 {
 		return nil, errors.New("Storage node not specified")
 	}
 
-	status, err := clients[0].GetStatus(context.Background())
+	status, err := clients.Trusted[0].GetStatus(context.Background())
 	if err != nil {
-		return nil, errors.WithMessagef(err, "Failed to get status from storage node %v", clients[0].URL())
+		return nil, errors.WithMessagef(err, "Failed to get status from storage node %v", clients.Trusted[0].URL())
 	}
 
 	chainId, err := w3Client.Eth.ChainId()
@@ -152,10 +160,12 @@ func NewUploader(ctx context.Context, w3Client *web3go.Client, clients []*node.Z
 	return uploader, nil
 }
 
-func checkLogExistence(ctx context.Context, clients []*node.ZgsClient, root common.Hash) (*node.FileInfo, error) {
+func checkLogExistence(ctx context.Context, clients *SelectedNodes, root common.Hash) (*node.FileInfo, error) {
 	var info *node.FileInfo
 	var err error
-	for _, client := range clients {
+	allClients := append(clients.Trusted, clients.Discovered...)
+
+	for _, client := range allClients {
 		info, err = client.GetFileInfo(ctx, root, true)
 		if err != nil {
 			return nil, err
@@ -209,6 +219,7 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 				Step:        opt.Step,
 				DataOptions: make([]UploadOption, 0),
 				Method:      opt.Method,
+				FullTrusted: opt.FullTrusted,
 			}
 			for i := l; i < r; i += 1 {
 				opts.DataOptions = append(opts.DataOptions, opt)
@@ -242,6 +253,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 			Nonce:       nil,
 			DataOptions: make([]UploadOption, n),
 			Method:      "min",
+			FullTrusted: true,
 		}
 	}
 	opts.TaskSize = max(opts.TaskSize, 1)
@@ -647,8 +659,10 @@ func (uploader *Uploader) waitForLogEntry(ctx context.Context, root common.Hash,
 	for {
 		time.Sleep(time.Second)
 
+		clients := append(uploader.clients.Trusted, uploader.clients.Discovered...)
+
 		ok := true
-		for _, client := range uploader.clients {
+		for _, client := range clients {
 			info, err = client.GetFileInfoByTxSeq(ctx, txSeq)
 			if err != nil {
 				return nil, err
@@ -684,57 +698,67 @@ func (uploader *Uploader) waitForLogEntry(ctx context.Context, root common.Hash,
 	return info, nil
 }
 
-func (uploader *Uploader) newSegmentUploader(ctx context.Context, info *node.FileInfo, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) (*segmentUploader, error) {
-	shardConfigs, err := getShardConfigs(ctx, uploader.clients)
+func (uploader *Uploader) newSegmentUploader(ctx context.Context, info *node.FileInfo, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) ([]*segmentUploader, error) {
+	createUploader := func(clients []*node.ZgsClient) (*segmentUploader, error) {
+		shardConfigs, err := getShardConfigs(ctx, clients)
+		if err != nil {
+			return nil, err
+		}
+		if !shard.CheckReplica(shardConfigs, expectedReplica, method) {
+			return nil, fmt.Errorf("selected nodes cannot cover all shards")
+		}
+		// compute index in flow
+		startSegmentIndex, endSegmentIndex := core.SegmentRange(info.Tx.StartEntryIndex, info.Tx.Size)
+		clientTasks := make([][]*uploadTask, 0)
+		for clientIndex, shardConfig := range shardConfigs {
+			// skip finalized nodes
+			info, _ := clients[clientIndex].GetFileInfo(ctx, tree.Root(), true)
+			if info != nil && info.Finalized {
+				continue
+			}
+			// create upload tasks
+			// segIndex % NumShard = shardId (in flow)
+			segIndex := shardConfig.NextSegmentIndex(startSegmentIndex)
+			tasks := make([]*uploadTask, 0)
+			for ; segIndex <= endSegmentIndex; segIndex += shardConfig.NumShard * uint64(taskSize) {
+				tasks = append(tasks, &uploadTask{
+					clientIndex: clientIndex,
+					segIndex:    segIndex - startSegmentIndex,
+					numShard:    shardConfig.NumShard,
+				})
+			}
+			clientTasks = append(clientTasks, tasks)
+		}
+		sort.SliceStable(clientTasks, func(i, j int) bool {
+			return len(clientTasks[i]) > len(clientTasks[j])
+		})
+		tasks := make([]*uploadTask, 0)
+		if len(clientTasks) > 0 {
+			for taskIndex := 0; taskIndex < len(clientTasks[0]); taskIndex += 1 {
+				for i := 0; i < len(clientTasks) && taskIndex < len(clientTasks[i]); i += 1 {
+					tasks = append(tasks, clientTasks[i][taskIndex])
+				}
+			}
+		}
+
+		return &segmentUploader{
+			data:     data,
+			tree:     tree,
+			txSeq:    info.Tx.Seq,
+			clients:  clients,
+			tasks:    tasks,
+			taskSize: taskSize,
+			logger:   uploader.logger,
+		}, nil
+	}
+
+	trustedUploader, err := createUploader(uploader.clients.Trusted)
 	if err != nil {
 		return nil, err
 	}
-	if !shard.CheckReplica(shardConfigs, expectedReplica, method) {
-		return nil, fmt.Errorf("selected nodes cannot cover all shards")
-	}
-	// compute index in flow
-	startSegmentIndex, endSegmentIndex := core.SegmentRange(info.Tx.StartEntryIndex, info.Tx.Size)
-	clientTasks := make([][]*uploadTask, 0)
-	for clientIndex, shardConfig := range shardConfigs {
-		// skip finalized nodes
-		info, _ := uploader.clients[clientIndex].GetFileInfo(ctx, tree.Root(), true)
-		if info != nil && info.Finalized {
-			continue
-		}
-		// create upload tasks
-		// segIndex % NumShard = shardId (in flow)
-		segIndex := shardConfig.NextSegmentIndex(startSegmentIndex)
-		tasks := make([]*uploadTask, 0)
-		for ; segIndex <= endSegmentIndex; segIndex += shardConfig.NumShard * uint64(taskSize) {
-			tasks = append(tasks, &uploadTask{
-				clientIndex: clientIndex,
-				segIndex:    segIndex - startSegmentIndex,
-				numShard:    shardConfig.NumShard,
-			})
-		}
-		clientTasks = append(clientTasks, tasks)
-	}
-	sort.SliceStable(clientTasks, func(i, j int) bool {
-		return len(clientTasks[i]) > len(clientTasks[j])
-	})
-	tasks := make([]*uploadTask, 0)
-	if len(clientTasks) > 0 {
-		for taskIndex := 0; taskIndex < len(clientTasks[0]); taskIndex += 1 {
-			for i := 0; i < len(clientTasks) && taskIndex < len(clientTasks[i]); i += 1 {
-				tasks = append(tasks, clientTasks[i][taskIndex])
-			}
-		}
-	}
+	discoveredUploader, err := createUploader(uploader.clients.Discovered)
 
-	return &segmentUploader{
-		data:     data,
-		tree:     tree,
-		txSeq:    info.Tx.Seq,
-		clients:  uploader.clients,
-		tasks:    tasks,
-		taskSize: taskSize,
-		logger:   uploader.logger,
-	}, nil
+	return []*segmentUploader{trustedUploader, discoveredUploader}, err
 }
 
 func (uploader *Uploader) uploadFile(ctx context.Context, info *node.FileInfo, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) error {
@@ -746,22 +770,32 @@ func (uploader *Uploader) uploadFile(ctx context.Context, info *node.FileInfo, d
 
 	uploader.logger.WithFields(logrus.Fields{
 		"segNum":   data.NumSegments(),
-		"nodeNum":  len(uploader.clients),
+		"nodeNum":  len(uploader.clients.Discovered) + len(uploader.clients.Trusted),
 		"sequence": info.Tx.Seq,
 		"root":     tree.Root(),
 	}).Info("Begin to upload file")
 
 	segmentUploader, err := uploader.newSegmentUploader(ctx, info, data, tree, expectedReplica, taskSize, method)
-	if err != nil {
+	if err != nil && segmentUploader == nil {
 		return err
+	}
+
+	if err != nil {
+		return errors.Errorf("Discovered nodes create uploader error: %v", err)
 	}
 
 	opt := parallel.SerialOption{
 		Routines: uploader.routines,
 	}
-	err = parallel.Serial(ctx, segmentUploader, len(segmentUploader.tasks), opt)
+
+	err = parallel.Serial(ctx, segmentUploader[1], len(segmentUploader[1].tasks), opt)
 	if err != nil {
-		return err
+		return errors.Errorf("Discovered nodes upload error: %v", err)
+	}
+
+	err = parallel.Serial(ctx, segmentUploader[0], len(segmentUploader[0].tasks), opt)
+	if err != nil {
+		return errors.Errorf("Trusted nodes upload error: %v", err)
 	}
 
 	uploader.logger.WithFields(logrus.Fields{
@@ -785,7 +819,7 @@ type FileSegmentUploader struct {
 	logger  *logrus.Logger    // logger
 }
 
-func NewFileSegementUploader(clients []*node.ZgsClient, opts ...zg_common.LogOption) *FileSegmentUploader {
+func NewFileSegmentUploader(clients []*node.ZgsClient, opts ...zg_common.LogOption) *FileSegmentUploader {
 	return &FileSegmentUploader{
 		clients: clients,
 		logger:  zg_common.NewLogger(opts...),

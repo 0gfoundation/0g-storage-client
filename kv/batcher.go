@@ -5,7 +5,6 @@ import (
 
 	zg_common "github.com/0glabs/0g-storage-client/common"
 	"github.com/0glabs/0g-storage-client/core"
-	"github.com/0glabs/0g-storage-client/node"
 	"github.com/0glabs/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/openweb3/web3go"
@@ -16,13 +15,13 @@ import (
 // Batcher struct to cache and execute KV write and access control operations.
 type Batcher struct {
 	*streamDataBuilder
-	clients  []*node.ZgsClient
+	clients  *transfer.SelectedNodes
 	w3Client *web3go.Client
 	logger   *logrus.Logger
 }
 
 // NewBatcher Initialize a new batcher. Version denotes the expected version of keys to read or write when the cached KV operations is settled on chain.
-func NewBatcher(version uint64, clients []*node.ZgsClient, w3Client *web3go.Client, opts ...zg_common.LogOption) *Batcher {
+func NewBatcher(version uint64, clients *transfer.SelectedNodes, w3Client *web3go.Client, opts ...zg_common.LogOption) *Batcher {
 	return &Batcher{
 		streamDataBuilder: newStreamDataBuilder(version),
 		clients:           clients,

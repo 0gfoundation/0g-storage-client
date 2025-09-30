@@ -129,9 +129,10 @@ func CheckReplica(shardConfigs []*ShardConfig, expectedReplica uint, method stri
 
 // Helper function to pre-process (sort or shuffle) the nodes before selection
 func prepareSelectionNodes(nodes []*ShardedNode, method string) []*ShardedNode {
-	if method == "random" {
+	switch method {
+	case "random":
 		util.Shuffle(nodes)
-	} else if method == "max" {
+	case "max":
 		// Sort nodes based on NumShard and ShardId
 		sort.Slice(nodes, func(i, j int) bool {
 			if nodes[i].Config.NumShard == nodes[j].Config.NumShard {
@@ -139,7 +140,7 @@ func prepareSelectionNodes(nodes []*ShardedNode, method string) []*ShardedNode {
 			}
 			return nodes[i].Config.NumShard > nodes[j].Config.NumShard
 		})
-	} else if method == "min" {
+	case "min":
 		// Sort nodes based on NumShard and ShardId
 		sort.Slice(nodes, func(i, j int) bool {
 			if nodes[i].Config.NumShard == nodes[j].Config.NumShard {
@@ -147,7 +148,7 @@ func prepareSelectionNodes(nodes []*ShardedNode, method string) []*ShardedNode {
 			}
 			return nodes[i].Config.NumShard < nodes[j].Config.NumShard
 		})
-	} else {
+	default:
 		// Attempt to parse `method` as a positive integer
 		size, err := strconv.Atoi(method)
 		if err != nil || size <= 0 {

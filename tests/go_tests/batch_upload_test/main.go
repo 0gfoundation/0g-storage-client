@@ -41,6 +41,7 @@ func runTest() error {
 		opts[i] = transfer.UploadOption{
 			FinalityRequired: transfer.FileFinalized,
 			Method:           "min",
+			FullTrusted:      true,
 		}
 	}
 	indexerClient, err := indexer.NewClient(indexerUrl, indexer.IndexerClientOption{LogOption: common.LogOption{Logger: logrus.StandardLogger()}})
@@ -51,6 +52,7 @@ func runTest() error {
 		TaskSize:    5,
 		DataOptions: opts,
 		Method:      "min",
+		FullTrusted: true,
 	})
 	if err != nil {
 		return errors.WithMessage(err, "failed to upload file")
