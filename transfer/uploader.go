@@ -700,6 +700,9 @@ func (uploader *Uploader) waitForLogEntry(ctx context.Context, root common.Hash,
 
 func (uploader *Uploader) newSegmentUploader(ctx context.Context, info *node.FileInfo, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) ([]*segmentUploader, error) {
 	createUploader := func(clients []*node.ZgsClient) (*segmentUploader, error) {
+		if len(clients) == 0 {
+			return nil, nil
+		}
 		shardConfigs, err := getShardConfigs(ctx, clients)
 		if err != nil {
 			return nil, err
@@ -788,9 +791,12 @@ func (uploader *Uploader) uploadFile(ctx context.Context, info *node.FileInfo, d
 		Routines: uploader.routines,
 	}
 
-	err = parallel.Serial(ctx, segmentUploader[1], len(segmentUploader[1].tasks), opt)
-	if err != nil {
-		return errors.Errorf("Discovered nodes upload error: %v", err)
+	if segmentUploader[1] != nil {
+		logrus.Infof("Uploading to %d discovered nodes", len(segmentUploader[1].clients))
+		err = parallel.Serial(ctx, segmentUploader[1], len(segmentUploader[1].tasks), opt)
+		if err != nil {
+			return errors.Errorf("Discovered nodes upload error: %v", err)
+		}
 	}
 
 	err = parallel.Serial(ctx, segmentUploader[0], len(segmentUploader[0].tasks), opt)
