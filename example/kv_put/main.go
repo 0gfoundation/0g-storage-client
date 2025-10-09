@@ -8,6 +8,7 @@ import (
 	"github.com/0glabs/0g-storage-client/common/blockchain"
 	"github.com/0glabs/0g-storage-client/kv"
 	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0glabs/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -25,7 +26,10 @@ func main() {
 	defer blockchainClient.Close()
 	blockchain.CustomGasLimit = 1000000
 
-	batcher := kv.NewBatcher(math.MaxUint64, []*node.ZgsClient{zgsClient}, blockchainClient)
+	batcher := kv.NewBatcher(math.MaxUint64, &transfer.SelectedNodes{
+		Trusted:    []*node.ZgsClient{zgsClient},
+		Discovered: []*node.ZgsClient{},
+	}, blockchainClient)
 	batcher.Set(common.HexToHash("0x000000000000000000000000000000000000000000000000000000000000f2bd"),
 		[]byte("TESTKEY0"),
 		[]byte{69, 70, 71, 72, 73},

@@ -39,8 +39,9 @@ var (
 		fee   float64
 		nonce uint
 
-		method  string
-		timeout time.Duration
+		method      string
+		fullTrusted bool
+		timeout     time.Duration
 	}
 
 	kvWriteCmd = &cobra.Command{
@@ -81,6 +82,7 @@ func init() {
 	kvWriteCmd.Flags().Float64Var(&kvWriteArgs.fee, "fee", 0, "fee paid in a0gi")
 	kvWriteCmd.Flags().UintVar(&kvWriteArgs.nonce, "nonce", 0, "nonce of upload transaction")
 	kvWriteCmd.Flags().StringVar(&kvWriteArgs.method, "method", "random", "method for selecting nodes, can be max, min, random, or positive number, if provided a number, will fail if the requirement cannot be met")
+	kvWriteCmd.Flags().BoolVar(&kvWriteArgs.fullTrusted, "full-trusted", false, "whether all selected nodes should be from trusted nodes")
 
 	rootCmd.AddCommand(kvWriteCmd)
 }
@@ -117,9 +119,10 @@ func kvWrite(*cobra.Command, []string) {
 		Fee:              fee,
 		Nonce:            nonce,
 		Method:           kvWriteArgs.method,
+		FullTrusted:      kvWriteArgs.fullTrusted,
 	}
 
-	var clients []*node.ZgsClient
+	var clients *transfer.SelectedNodes
 	if kvWriteArgs.indexer != "" {
 		indexerClient, err := indexer.NewClient(kvWriteArgs.indexer, indexer.IndexerClientOption{
 			ProviderOption: providerOption,
@@ -128,16 +131,17 @@ func kvWrite(*cobra.Command, []string) {
 		if err != nil {
 			logrus.WithError(err).Fatal("Failed to initialize indexer client")
 		}
-		if clients, err = indexerClient.SelectNodes(ctx, 0, max(1, opt.ExpectedReplica), []string{}, opt.Method); err != nil {
+		if clients, err = indexerClient.SelectNodes(ctx, max(1, opt.ExpectedReplica), []string{}, opt.Method, opt.FullTrusted); err != nil {
 			logrus.WithError(err).Fatal("failed to select nodes from indexer")
 		}
 	}
-	if len(clients) == 0 {
+	if len(clients.Trusted) == 0 && len(clients.Discovered) == 0 {
 		if len(kvWriteArgs.node) == 0 {
 			logrus.Fatal("At least one of --node and --indexer should not be empty")
 		}
-		clients = node.MustNewZgsClients(kvWriteArgs.node, providerOption)
-		for _, client := range clients {
+		trusted := node.MustNewZgsClients(kvWriteArgs.node, providerOption)
+		clients = &transfer.SelectedNodes{Trusted: trusted}
+		for _, client := range trusted {
 			defer client.Close()
 		}
 	}

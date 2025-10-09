@@ -60,6 +60,7 @@ type uploadArgument struct {
 	nRetries     int
 	step         int64
 	method       string
+	fullTrusted  bool
 
 	timeout time.Duration
 }
@@ -87,6 +88,7 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().IntVar(&args.nRetries, "n-retries", 0, "number of retries for uploading when it's not gas price issue")
 	cmd.Flags().Int64Var(&args.step, "step", 15, "step of gas price increasing, step / 10 (for 15, the new gas price is 1.5 * last gas price)")
 	cmd.Flags().StringVar(&args.method, "method", "min", "method for selecting nodes, can be max, min, random, or positive number, if provided a number, will fail if the requirement cannot be met")
+	cmd.Flags().BoolVar(&args.fullTrusted, "full-trusted", true, "whether to use full trusted nodes")
 
 	cmd.Flags().DurationVar(&args.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
 }
@@ -149,6 +151,7 @@ func upload(*cobra.Command, []string) {
 		NRetries:         uploadArgs.nRetries,
 		Step:             uploadArgs.step,
 		Method:           uploadArgs.method,
+		FullTrusted:      uploadArgs.fullTrusted,
 	}
 
 	file, err := core.Open(uploadArgs.file)
@@ -165,9 +168,25 @@ func upload(*cobra.Command, []string) {
 	uploader.WithRoutines(uploadArgs.routines)
 
 	_, roots, err := uploader.SplitableUpload(ctx, file, uploadArgs.fragmentSize, opt)
-	if err != nil {
-		logrus.WithError(err).Fatal("Failed to upload file")
+	if err != nil && opt.FullTrusted {
+		logrus.WithError(err).Fatal("Failed to upload file with full trusted nodes")
 	}
+
+	if err != nil && !opt.FullTrusted {
+		logrus.WithError(err).Warn("Upload with full trusted nodes failed, retrying with all full trusted nodes")
+		opt.FullTrusted = true
+		fullUploader, fullCloser, err := newUploader(ctx, file.NumSegments(), uploadArgs, w3client, opt)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize uploader")
+		}
+		defer fullCloser()
+		fullUploader.WithRoutines(uploadArgs.routines)
+		_, roots, err = fullUploader.SplitableUpload(ctx, file, uploadArgs.fragmentSize, opt)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to upload file with full trusted nodes")
+		}
+	}
+
 	if len(roots) == 1 {
 		logrus.Infof("file uploaded, root = %v", roots[0])
 	} else {
@@ -189,7 +208,7 @@ func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3clie
 			return nil, nil, errors.WithMessage(err, "failed to initialize indexer client")
 		}
 
-		up, err := indexerClient.NewUploaderFromIndexerNodes(ctx, segNum, w3client, opt.ExpectedReplica, nil, opt.Method)
+		up, err := indexerClient.NewUploaderFromIndexerNodes(ctx, segNum, w3client, opt.ExpectedReplica, nil, opt.Method, opt.FullTrusted)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -204,7 +223,7 @@ func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3clie
 		}
 	}
 
-	up, err := transfer.NewUploader(ctx, w3client, clients, zg_common.LogOption{Logger: logrus.StandardLogger()})
+	up, err := transfer.NewUploader(ctx, w3client, &transfer.SelectedNodes{Trusted: clients}, zg_common.LogOption{Logger: logrus.StandardLogger()})
 	if err != nil {
 		closer()
 		return nil, nil, err

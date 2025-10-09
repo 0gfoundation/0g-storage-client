@@ -39,6 +39,7 @@ type Client struct {
 type IndexerClientOption struct {
 	ProviderOption providers.Option
 	LogOption      common.LogOption // log option when uploading data
+	FullTrusted    bool             // whether to use full trusted nodes
 }
 
 // NewClient create new indexer client, url is indexer service url
@@ -75,64 +76,89 @@ func (c *Client) GetFileLocations(ctx context.Context, root string) ([]*shard.Sh
 	return providers.CallContext[[]*shard.ShardedNode](c, ctx, "indexer_getFileLocations", root)
 }
 
-// SelectNodes get node list from indexer service and select a subset of it, which is sufficient to store expected number of replications.
-func (c *Client) SelectNodes(ctx context.Context, segNum uint64, expectedReplica uint, dropped []string, method string) ([]*node.ZgsClient, error) {
+// SelectNodes selects nodes from both trusted and discovered, with discovered max 3/5 of expectedReplica. If discovered cannot meet, all from trusted.
+func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped []string, method string, fullTrusted bool) (*transfer.SelectedNodes, error) {
 	allNodes, err := c.GetShardedNodes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	// filter out nodes unable to connect
-	nodes := make([]*shard.ShardedNode, 0)
-	for _, shardedNode := range allNodes.Trusted {
-		if slices.Contains(dropped, shardedNode.URL) {
-			continue
-		}
-		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
-		if err != nil {
-			c.logger.Debugf("failed to initialize client of node %v, dropped.", shardedNode.URL)
-			continue
-		}
-		defer client.Close()
-		start := time.Now()
-		config, err := client.GetShardConfig(ctx)
-		if err != nil || !config.IsValid() {
-			c.logger.Debugf("failed to get shard config of node %v, dropped.", shardedNode.URL)
-			continue
-		}
 
-		nodes = append(nodes, &shard.ShardedNode{
-			URL:     shardedNode.URL,
-			Config:  config,
-			Latency: time.Since(start).Milliseconds(),
-		})
+	fetchNodes := func(shardedNodes []*shard.ShardedNode) []*shard.ShardedNode {
+		nodes := make([]*shard.ShardedNode, 0)
+		for _, shardedNode := range shardedNodes {
+			if slices.Contains(dropped, shardedNode.URL) {
+				continue
+			}
+			client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+			if err != nil {
+				c.logger.Debugf("failed to initialize client of node %v, dropped.", shardedNode.URL)
+				continue
+			}
+			defer client.Close()
+			start := time.Now()
+			config, err := client.GetShardConfig(ctx)
+			if err != nil || !config.IsValid() {
+				c.logger.Debugf("failed to get shard config of node %v, dropped.", shardedNode.URL)
+				continue
+			}
+			nodes = append(nodes, &shard.ShardedNode{
+				URL:     shardedNode.URL,
+				Config:  config,
+				Latency: time.Since(start).Milliseconds(),
+			})
+		}
+		return nodes
 	}
-	// randomly select proper subset
-	trusted, ok := shard.Select(nodes, expectedReplica, method)
+
+	trustedNodes := fetchNodes(allNodes.Trusted)
+	discoveredNodes := fetchNodes(allNodes.Discovered)
+
+	discoveredReplica := uint(0)
+	if !fullTrusted {
+		discoveredReplica = uint(expectedReplica) * 3 / 5
+	}
+
+	discoveredSelected, _ := shard.Select(discoveredNodes, discoveredReplica, method)
+	if len(discoveredSelected) == 0 {
+		discoveredReplica = 0
+	}
+
+	trustedSelected, ok := shard.Select(trustedNodes, expectedReplica-discoveredReplica, method)
 	if !ok {
 		return nil, fmt.Errorf("cannot select a subset from the returned nodes that meets the replication requirement")
 	}
-	clients := make([]*node.ZgsClient, len(trusted))
-	for i, shardedNode := range trusted {
-		clients[i], err = node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
-		if err != nil {
-			return nil, errors.WithMessage(err, fmt.Sprintf("failed to initialize storage node client with %v", shardedNode.URL))
+
+	trustedClients := make([]*node.ZgsClient, 0, len(trustedSelected))
+	for _, shardedNode := range trustedSelected {
+		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+		if err == nil {
+			trustedClients = append(trustedClients, client)
 		}
 	}
-	return clients, nil
+
+	discoveredClients := make([]*node.ZgsClient, 0, len(discoveredSelected))
+	for _, shardedNode := range discoveredSelected {
+		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+		if err == nil {
+			discoveredClients = append(discoveredClients, client)
+		}
+	}
+
+	return &transfer.SelectedNodes{
+		Trusted:    trustedClients,
+		Discovered: discoveredClients,
+	}, nil
 }
 
 // NewUploaderFromIndexerNodes return an uploader with selected storage nodes from indexer service.
-func (c *Client) NewUploaderFromIndexerNodes(ctx context.Context, segNum uint64, w3Client *web3go.Client, expectedReplica uint, dropped []string, method string) (*transfer.Uploader, error) {
-	clients, err := c.SelectNodes(ctx, segNum, expectedReplica, dropped, method)
+func (c *Client) NewUploaderFromIndexerNodes(ctx context.Context, segNum uint64, w3Client *web3go.Client, expectedReplica uint, dropped []string, method string, fullTrusted bool) (*transfer.Uploader, error) {
+	selected, err := c.SelectNodes(ctx, expectedReplica, dropped, method, fullTrusted)
 	if err != nil {
 		return nil, err
 	}
-	urls := make([]string, len(clients))
-	for i, client := range clients {
-		urls[i] = client.URL()
-	}
-	c.logger.Infof("get %v storage nodes from indexer: %v", len(urls), urls)
-	return transfer.NewUploader(ctx, w3Client, clients, c.option.LogOption)
+
+	c.logger.Infof("get storage nodes from indexer (trusted: %v, discovered: %v)", len(selected.Trusted), len(selected.Discovered))
+	return transfer.NewUploader(ctx, w3Client, selected, c.option.LogOption)
 }
 
 // Upload submit data to 0g storage contract, then transfer the data to the storage nodes selected from indexer service.
@@ -143,7 +169,7 @@ func (c *Client) Upload(ctx context.Context, w3Client *web3go.Client, data core.
 	}
 	dropped := make([]string, 0)
 	for {
-		uploader, err := c.NewUploaderFromIndexerNodes(ctx, data.NumSegments(), w3Client, expectedReplica, dropped, option[0].Method)
+		uploader, err := c.NewUploaderFromIndexerNodes(ctx, data.NumSegments(), w3Client, expectedReplica, dropped, option[0].Method, option[0].FullTrusted)
 		if err != nil {
 			return eth_common.Hash{}, err
 		}
@@ -172,7 +198,7 @@ func (c *Client) BatchUpload(ctx context.Context, w3Client *web3go.Client, datas
 	}
 	dropped := make([]string, 0)
 	for {
-		uploader, err := c.NewUploaderFromIndexerNodes(ctx, maxSegNum, w3Client, expectedReplica, dropped, option[0].Method)
+		uploader, err := c.NewUploaderFromIndexerNodes(ctx, maxSegNum, w3Client, expectedReplica, dropped, option[0].Method, option[0].FullTrusted)
 		if err != nil {
 			return eth_common.Hash{}, nil, err
 		}
@@ -189,18 +215,23 @@ func (c *Client) BatchUpload(ctx context.Context, w3Client *web3go.Client, datas
 
 // NewUploaderFromIndexerNodes return a file segment uploader with selected storage nodes from indexer service.
 func (c *Client) NewFileSegmentUploaderFromIndexerNodes(
-	ctx context.Context, segNum uint64, expectedReplica uint, dropped []string, method string) (*transfer.FileSegmentUploader, error) {
-
-	clients, err := c.SelectNodes(ctx, segNum, expectedReplica, dropped, method)
+	ctx context.Context, segNum uint64, expectedReplica uint, dropped []string, method string, fullTrusted bool) ([]*transfer.FileSegmentUploader, error) {
+	selected, err := c.SelectNodes(ctx, expectedReplica, dropped, method, fullTrusted)
 	if err != nil {
 		return nil, err
 	}
-	urls := make([]string, len(clients))
-	for i, client := range clients {
-		urls[i] = client.URL()
+
+	uploaders := make([]*transfer.FileSegmentUploader, 0, 2)
+	if len(selected.Trusted) > 0 {
+		uploader := transfer.NewFileSegmentUploader(selected.Trusted, c.option.LogOption)
+		uploaders = append(uploaders, uploader)
 	}
-	c.logger.Infof("get %v storage nodes from indexer: %v", len(urls), urls)
-	return transfer.NewFileSegementUploader(clients, c.option.LogOption), nil
+	if len(selected.Discovered) > 0 {
+		uploader := transfer.NewFileSegmentUploader(selected.Discovered, c.option.LogOption)
+		uploaders = append(uploaders, uploader)
+	}
+	c.logger.Infof("get storage nodes from indexer (trusted: %v, discovered: %v)", len(selected.Trusted), len(selected.Discovered))
+	return uploaders, nil
 }
 
 // UploadFileSegments transfer segment data of a file, which should has already been submitted to the 0g storage contract,
@@ -224,17 +255,19 @@ func (c *Client) UploadFileSegments(
 	numSeg := core.NumSplits(int64(fileSeg.FileInfo.Tx.Size), core.DefaultSegmentSize)
 	dropped := make([]string, 0)
 	for {
-		uploader, err := c.NewFileSegmentUploaderFromIndexerNodes(ctx, numSeg, expectedReplica, dropped, option[0].Method)
+		uploaders, err := c.NewFileSegmentUploaderFromIndexerNodes(ctx, numSeg, expectedReplica, dropped, option[0].Method, true)
 		if err != nil {
 			return err
 		}
 
 		var rpcError *node.RPCError
-		if err := uploader.Upload(ctx, fileSeg, option...); errors.As(err, &rpcError) {
-			dropped = append(dropped, rpcError.URL)
-			c.logger.Infof("dropped problematic node and retry: %v", rpcError.Error())
-		} else {
-			return err
+		for _, uploader := range uploaders {
+			if err := uploader.Upload(ctx, fileSeg, option...); errors.As(err, &rpcError) {
+				dropped = append(dropped, rpcError.URL)
+				c.logger.Infof("dropped problematic node and retry: %v", rpcError.Error())
+			} else {
+				return err
+			}
 		}
 	}
 }

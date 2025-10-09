@@ -123,7 +123,7 @@ func uploadLocalFile(c *gin.Context) (interface{}, error) {
 		return nil, api.ErrValidation.WithData("node index out of bound")
 	}
 
-	uploader, err := transfer.NewUploader(context.Background(), nil, []*node.ZgsClient{allClients[input.Node]}, zg_common.LogOption{Logger: logrus.StandardLogger()})
+	uploader, err := transfer.NewUploader(context.Background(), nil, &transfer.SelectedNodes{Trusted: []*node.ZgsClient{allClients[input.Node]}}, zg_common.LogOption{Logger: logrus.StandardLogger()})
 	if err != nil {
 		return nil, errors.WithMessage(err, "Failed to create uploader")
 	}
