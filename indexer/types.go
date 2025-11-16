@@ -3,7 +3,7 @@ package indexer
 import (
 	"context"
 
-	"github.com/0glabs/0g-storage-client/common/shard"
+	"github.com/0gfoundation/0g-storage-client/common/shard"
 )
 
 type ShardedNodes struct {

@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/0glabs/0g-storage-client/gateway"
-	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/gateway"
+	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/spf13/cobra"
 )
 

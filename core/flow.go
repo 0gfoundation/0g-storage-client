@@ -5,10 +5,10 @@ import (
 	"math"
 	"math/big"
 
-	"github.com/0glabs/0g-storage-client/common"
-	"github.com/0glabs/0g-storage-client/common/parallel"
-	"github.com/0glabs/0g-storage-client/contract"
-	"github.com/0glabs/0g-storage-client/core/merkle"
+	"github.com/0gfoundation/0g-storage-client/common"
+	"github.com/0gfoundation/0g-storage-client/common/parallel"
+	"github.com/0gfoundation/0g-storage-client/contract"
+	"github.com/0gfoundation/0g-storage-client/core/merkle"
 	"github.com/sirupsen/logrus"
 )
 

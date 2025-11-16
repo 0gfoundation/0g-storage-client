@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0glabs/0g-storage-client/common/shard"
-	"github.com/0glabs/0g-storage-client/core"
-	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/common/shard"
+	"github.com/0gfoundation/0g-storage-client/core"
+	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"

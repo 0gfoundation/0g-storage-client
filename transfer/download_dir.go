@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/0glabs/0g-storage-client/transfer/dir"
-	"github.com/0glabs/0g-storage-client/transfer/download"
+	"github.com/0gfoundation/0g-storage-client/transfer/dir"
+	"github.com/0gfoundation/0g-storage-client/transfer/download"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )

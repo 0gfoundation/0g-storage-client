@@ -3,11 +3,11 @@ package gateway
 import (
 	"context"
 
-	"github.com/0glabs/0g-storage-client/common/api"
-	"github.com/0glabs/0g-storage-client/core"
-	"github.com/0glabs/0g-storage-client/core/merkle"
-	"github.com/0glabs/0g-storage-client/node"
-	"github.com/0glabs/0g-storage-client/transfer"
+	"github.com/0gfoundation/0g-storage-client/common/api"
+	"github.com/0gfoundation/0g-storage-client/core"
+	"github.com/0gfoundation/0g-storage-client/core/merkle"
+	"github.com/0gfoundation/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"

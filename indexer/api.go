@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/0glabs/0g-storage-client/common/shard"
+	"github.com/0gfoundation/0g-storage-client/common/shard"
 	eth_common "github.com/ethereum/go-ethereum/common"
 	"github.com/pkg/errors"
 )

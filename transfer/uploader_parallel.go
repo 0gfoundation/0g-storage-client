@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/0glabs/0g-storage-client/common/parallel"
-	"github.com/0glabs/0g-storage-client/core"
-	"github.com/0glabs/0g-storage-client/core/merkle"
-	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/common/parallel"
+	"github.com/0gfoundation/0g-storage-client/core"
+	"github.com/0gfoundation/0g-storage-client/core/merkle"
+	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )

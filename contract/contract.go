@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0glabs/0g-storage-client/common/blockchain"
+	"github.com/0gfoundation/0g-storage-client/common/blockchain"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"

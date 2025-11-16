@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0glabs/0g-storage-client/common/util"
+	"github.com/0gfoundation/0g-storage-client/common/util"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )

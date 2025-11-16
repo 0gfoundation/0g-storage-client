@@ -3,8 +3,8 @@ package gateway
 import (
 	"net/http"
 
-	"github.com/0glabs/0g-storage-client/common/api"
-	"github.com/0glabs/0g-storage-client/indexer"
+	"github.com/0gfoundation/0g-storage-client/common/api"
+	"github.com/0gfoundation/0g-storage-client/indexer"
 	"github.com/gin-gonic/gin"
 )
 

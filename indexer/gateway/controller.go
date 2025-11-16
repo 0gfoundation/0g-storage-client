@@ -4,9 +4,9 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/0glabs/0g-storage-client/common/shard"
-	"github.com/0glabs/0g-storage-client/indexer"
-	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/common/shard"
+	"github.com/0gfoundation/0g-storage-client/indexer"
+	"github.com/0gfoundation/0g-storage-client/node"
 	eth_common "github.com/ethereum/go-ethereum/common"
 	"github.com/pkg/errors"
 )

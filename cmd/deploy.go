@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/0glabs/0g-storage-client/common/blockchain"
+	"github.com/0gfoundation/0g-storage-client/common/blockchain"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

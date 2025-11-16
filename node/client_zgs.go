@@ -3,7 +3,7 @@ package node
 import (
 	"context"
 
-	"github.com/0glabs/0g-storage-client/common/shard"
+	"github.com/0gfoundation/0g-storage-client/common/shard"
 	"github.com/ethereum/go-ethereum/common"
 	providers "github.com/openweb3/go-rpc-provider/provider_wrapper"
 	"github.com/sirupsen/logrus"

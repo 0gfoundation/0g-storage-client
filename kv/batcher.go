@@ -3,9 +3,9 @@ package kv
 import (
 	"context"
 
-	zg_common "github.com/0glabs/0g-storage-client/common"
-	"github.com/0glabs/0g-storage-client/core"
-	"github.com/0glabs/0g-storage-client/transfer"
+	zg_common "github.com/0gfoundation/0g-storage-client/common"
+	"github.com/0gfoundation/0g-storage-client/core"
+	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/openweb3/web3go"
 	"github.com/pkg/errors"

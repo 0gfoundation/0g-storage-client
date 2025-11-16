@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/0glabs/0g-storage-client/kv"
-	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/kv"
+	"github.com/0gfoundation/0g-storage-client/node"
 	ethCommon "github.com/ethereum/go-ethereum/common"
 )
 

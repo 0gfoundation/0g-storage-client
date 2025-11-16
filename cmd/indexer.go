@@ -3,9 +3,9 @@ package cmd
 import (
 	"time"
 
-	"github.com/0glabs/0g-storage-client/common/rpc"
-	"github.com/0glabs/0g-storage-client/indexer"
-	"github.com/0glabs/0g-storage-client/indexer/gateway"
+	"github.com/0gfoundation/0g-storage-client/common/rpc"
+	"github.com/0gfoundation/0g-storage-client/indexer"
+	"github.com/0gfoundation/0g-storage-client/indexer/gateway"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
