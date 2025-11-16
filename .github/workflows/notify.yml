@@ -1,0 +1,14 @@
+name: Release Notifications
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify-slack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack Notification
+        uses: udhaykumarbala/slack-release-notifier@v1.0.1
+        with:
+          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
