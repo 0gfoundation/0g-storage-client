@@ -1,8 +1,8 @@
 package gateway
 
 import (
-	"github.com/0glabs/0g-storage-client/common/api"
-	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/common/api"
+	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )

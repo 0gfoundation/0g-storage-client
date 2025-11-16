@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/0glabs/0g-storage-client/common/blockchain"
+	"github.com/0gfoundation/0g-storage-client/common/blockchain"
 	"github.com/mcuadros/go-defaults"
 	providers "github.com/openweb3/go-rpc-provider/provider_wrapper"
 	"github.com/sirupsen/logrus"

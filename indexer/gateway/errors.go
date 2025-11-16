@@ -1,6 +1,6 @@
 package gateway
 
-import "github.com/0glabs/0g-storage-client/common/api"
+import "github.com/0gfoundation/0g-storage-client/common/api"
 
 var (
 	ErrFileNotFound        = api.NewBusinessError(101, "File not found")

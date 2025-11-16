@@ -6,7 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/0glabs/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/node"
 	"gotest.tools/assert"
 )
 

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/0glabs/0g-storage-client/core"
+	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/pkg/errors"
 )

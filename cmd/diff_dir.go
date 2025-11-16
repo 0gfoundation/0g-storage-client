@@ -3,8 +3,8 @@ package cmd
 import (
 	"context"
 
-	"github.com/0glabs/0g-storage-client/transfer"
-	"github.com/0glabs/0g-storage-client/transfer/dir"
+	"github.com/0gfoundation/0g-storage-client/transfer"
+	"github.com/0gfoundation/0g-storage-client/transfer/dir"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

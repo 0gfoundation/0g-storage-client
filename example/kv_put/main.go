@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/0glabs/0g-storage-client/common/blockchain"
-	"github.com/0glabs/0g-storage-client/kv"
-	"github.com/0glabs/0g-storage-client/node"
-	"github.com/0glabs/0g-storage-client/transfer"
+	"github.com/0gfoundation/0g-storage-client/common/blockchain"
+	"github.com/0gfoundation/0g-storage-client/kv"
+	"github.com/0gfoundation/0g-storage-client/node"
+	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 )
 

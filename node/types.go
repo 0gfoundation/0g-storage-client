@@ -3,8 +3,8 @@ package node
 import (
 	"encoding/json"
 
-	"github.com/0glabs/0g-storage-client/common/shard"
-	"github.com/0glabs/0g-storage-client/core/merkle"
+	"github.com/0gfoundation/0g-storage-client/common/shard"
+	"github.com/0gfoundation/0g-storage-client/core/merkle"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )

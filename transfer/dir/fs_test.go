@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/0glabs/0g-storage-client/core"
-	"github.com/0glabs/0g-storage-client/transfer/dir"
+	"github.com/0gfoundation/0g-storage-client/core"
+	"github.com/0gfoundation/0g-storage-client/transfer/dir"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
