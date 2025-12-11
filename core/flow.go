@@ -27,8 +27,11 @@ func NewFlow(data IterableData, tags []byte, opts ...common.LogOption) *Flow {
 func (flow *Flow) CreateSubmission(submitter ethcommon.Address) (*contract.Submission, error) {
 	// TODO(kevin): limit file size, e.g., 2^31
 	submission := contract.Submission{
-		Length:    big.NewInt(flow.data.Size()),
-		Tags:      flow.tags,
+		Data: contract.SubmissionData{
+			Length: big.NewInt(flow.data.Size()),
+			Tags:   flow.tags,
+			Nodes:  make([]contract.SubmissionNode, 0),
+		},
 		Submitter: submitter,
 	}
 
@@ -38,7 +41,7 @@ func (flow *Flow) CreateSubmission(submitter ethcommon.Address) (*contract.Submi
 		if err != nil {
 			return nil, err
 		}
-		submission.Nodes = append(submission.Nodes, *node)
+		submission.Data.Nodes = append(submission.Data.Nodes, *node)
 		offset += chunks * DefaultChunkSize
 	}
 
