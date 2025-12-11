@@ -55,6 +55,14 @@ func NewFlowContract(flowAddress common.Address, clientWithSigner *web3go.Client
 	return &FlowContract{contract, flow, clientWithSigner}, nil
 }
 
+func (f *FlowContract) GetSubmitterAddress() (common.Address, error) {
+	sm, err := f.clientWithSigner.GetSignerManager()
+	if err != nil {
+		return common.Address{}, err
+	}
+	return sm.List()[0].Address(), nil
+}
+
 func (f *FlowContract) GetNonce(ctx context.Context) (*big.Int, error) {
 	sm, err := f.clientWithSigner.GetSignerManager()
 	if err != nil {
