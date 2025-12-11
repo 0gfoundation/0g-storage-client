@@ -40,8 +40,9 @@ func bindTransactionFlags(cmd *cobra.Command, args *transactionArgument) {
 type uploadArgument struct {
 	transactionArgument
 
-	file string
-	tags string
+	file      string
+	tags      string
+	submitter string
 
 	node    []string
 	indexer string
@@ -71,6 +72,7 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().StringVar(&args.file, "file", "", "File name to upload")
 	cmd.MarkFlagRequired("file")
 	cmd.Flags().StringVar(&args.tags, "tags", "0x", "Tags of the file")
+	cmd.Flags().StringVar(&args.submitter, "submitter", "", "Address to submit transaction from (optional, defaults to key owner)")
 
 	cmd.Flags().StringSliceVar(&args.node, "node", []string{}, "ZeroGStorage storage node URL")
 	cmd.Flags().StringVar(&args.indexer, "indexer", "", "ZeroGStorage indexer URL")
@@ -127,6 +129,21 @@ func upload(*cobra.Command, []string) {
 	w3client := blockchain.MustNewWeb3(uploadArgs.url, uploadArgs.key, providerOption)
 	defer w3client.Close()
 
+	// Extract submitter address once from w3client, or use provided submitter if specified
+	var submitter common.Address
+	if uploadArgs.submitter != "" {
+		submitter = common.HexToAddress(uploadArgs.submitter)
+		if submitter == (common.Address{}) {
+			logrus.Fatal("Invalid submitter address provided")
+		}
+	} else {
+		sm, err := w3client.GetSignerManager()
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to get signer manager")
+		}
+		submitter = sm.List()[0].Address()
+	}
+
 	var fee *big.Int
 	if uploadArgs.fee > 0 {
 		feeInA0GI := big.NewFloat(uploadArgs.fee)
@@ -146,6 +163,7 @@ func upload(*cobra.Command, []string) {
 		maxGasPrice = big.NewInt(int64(uploadArgs.maxGasPrice))
 	}
 	opt := transfer.UploadOption{
+		Submitter:        submitter,
 		Tags:             hexutil.MustDecode(uploadArgs.tags),
 		FinalityRequired: finalityRequired,
 		TaskSize:         uploadArgs.taskSize,
