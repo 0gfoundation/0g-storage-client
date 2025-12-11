@@ -60,6 +60,7 @@ type SelectedNodes struct {
 
 // UploadOption upload option for a file
 type UploadOption struct {
+	Submitter        common.Address      // address of the transaction sender
 	Tags             []byte              // transaction tags
 	FinalityRequired FinalityRequirement // finality setting
 	TaskSize         uint                // number of segment to upload in single rpc request
@@ -76,6 +77,7 @@ type UploadOption struct {
 
 // BatchUploadOption upload option for a batching
 type BatchUploadOption struct {
+	Submitter   common.Address // address of the transaction sender
 	Fee         *big.Int       // fee in neuron
 	Nonce       *big.Int       // nonce for transaction
 	MaxGasPrice *big.Int       // max gas price for transaction
@@ -89,6 +91,7 @@ type BatchUploadOption struct {
 
 // SubmitLogEntryOption option for submitting log entry
 type SubmitLogEntryOption struct {
+	Submitter   common.Address // address of the transaction sender
 	Fee         *big.Int
 	Nonce       *big.Int
 	MaxGasPrice *big.Int
@@ -212,6 +215,7 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 			r := min(l+int(defaultBatchSize), len(fragments))
 			uploader.logger.Infof("batch submitting fragments %v to %v...", l, r)
 			opts := BatchUploadOption{
+				Submitter:   opt.Submitter,
 				Fee:         nil,
 				Nonce:       nil,
 				MaxGasPrice: opt.MaxGasPrice,
@@ -247,8 +251,16 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 	var opts BatchUploadOption
 	if len(option) > 0 {
 		opts = option[0]
+		if opts.Submitter == (common.Address{}) {
+			return common.Hash{}, nil, errors.New("submitter address not set in upload option")
+		}
 	} else {
+		submitter, err := uploader.flow.GetSubmitterAddress()
+		if err != nil {
+			return common.Hash{}, nil, errors.WithMessage(err, "Failed to get submitter address from flow contract")
+		}
 		opts = BatchUploadOption{
+			Submitter:   submitter,
 			Fee:         nil,
 			Nonce:       nil,
 			DataOptions: make([]UploadOption, n),
@@ -331,12 +343,14 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 
 	if len(toSubmitDatas) > 0 {
 		submitOpt := SubmitLogEntryOption{
+			Submitter:   opts.Submitter,
 			Fee:         opts.Fee,
 			Nonce:       opts.Nonce,
 			MaxGasPrice: opts.MaxGasPrice,
 			NRetries:    opts.NRetries,
 			Step:        opts.Step,
 		}
+
 		var err error
 		if txHash, receipt, err = uploader.SubmitLogEntry(ctx, toSubmitDatas, toSubmitTags, submitOpt); err != nil {
 			return txHash, nil, errors.WithMessage(err, "Failed to submit log entry")
@@ -420,6 +434,15 @@ func (uploader *Uploader) Upload(ctx context.Context, data core.IterableData, op
 	var opt UploadOption
 	if len(option) > 0 {
 		opt = option[0]
+		if opt.Submitter == (common.Address{}) {
+			return common.Hash{}, common.Hash{}, errors.New("submitter address not set in upload option")
+		}
+	} else {
+		submitter, err := uploader.flow.GetSubmitterAddress()
+		if err != nil {
+			return common.Hash{}, common.Hash{}, errors.WithMessage(err, "Failed to get submitter address from flow contract")
+		}
+		opt.Submitter = submitter
 	}
 
 	uploader.logger.WithFields(logrus.Fields{
@@ -446,12 +469,14 @@ func (uploader *Uploader) Upload(ctx context.Context, data core.IterableData, op
 		uploader.logger.WithField("root", tree.Root()).Info("Prepare to submit log entry")
 		// Submit log entry to smart contract.
 		submitOpts := SubmitLogEntryOption{
+			Submitter:   opt.Submitter,
 			Fee:         opt.Fee,
 			Nonce:       opt.Nonce,
 			MaxGasPrice: opt.MaxGasPrice,
 			NRetries:    opt.NRetries,
 			Step:        opt.Step,
 		}
+
 		var receipt *types.Receipt
 
 		txHash, receipt, err = uploader.SubmitLogEntry(ctx, []core.IterableData{data}, [][]byte{opt.Tags}, submitOpts)
@@ -556,17 +581,11 @@ func (uploader *Uploader) UploadFile(ctx context.Context, path string, option ..
 
 // SubmitLogEntry submit the data to 0g storage contract by sending a transaction
 func (uploader *Uploader) SubmitLogEntry(ctx context.Context, datas []core.IterableData, tags [][]byte, submitOption SubmitLogEntryOption) (common.Hash, *types.Receipt, error) {
-	// Get submitter address
-	submitter, err := uploader.flow.GetSubmitterAddress()
-	if err != nil {
-		return common.Hash{}, nil, errors.WithMessage(err, "Failed to get submitter address")
-	}
-
 	// Construct submission
 	submissions := make([]contract.Submission, len(datas))
 	for i := 0; i < len(datas); i++ {
 		flow := core.NewFlow(datas[i], tags[i])
-		submission, err := flow.CreateSubmission(submitter)
+		submission, err := flow.CreateSubmission(submitOption.Submitter)
 		if err != nil {
 			return common.Hash{}, nil, errors.WithMessage(err, "Failed to create flow submission")
 		}
@@ -640,14 +659,8 @@ func (uploader *Uploader) SubmitLogEntry(ctx context.Context, datas []core.Itera
 // EstimateFee estimates the protocol fee (in Wei) for uploading a single data item with given tags.
 // It uses the same Submission.Fee(pricePerSector) calculation as SubmitLogEntry.
 func (uploader *Uploader) EstimateFee(ctx context.Context, data core.IterableData, tags []byte) (*big.Int, error) {
-	// Get submitter address
-	submitter, err := uploader.flow.GetSubmitterAddress()
-	if err != nil {
-		return nil, errors.WithMessage(err, "Failed to get submitter address for fee estimation")
-	}
-
 	flow := core.NewFlow(data, tags)
-	submission, err := flow.CreateSubmission(submitter)
+	submission, err := flow.CreateSubmission(common.Address{})
 	if err != nil {
 		return nil, errors.WithMessage(err, "Failed to create flow submission for fee estimation")
 	}
@@ -665,12 +678,6 @@ func (uploader *Uploader) EstimateBatchFee(ctx context.Context, datas []core.Ite
 	if len(datas) != len(tags) {
 		return nil, errors.New("datas and tags length mismatch")
 	}
-	// Get submitter address
-	submitter, err := uploader.flow.GetSubmitterAddress()
-	if err != nil {
-		return nil, errors.WithMessage(err, "Failed to get submitter address for batch fee estimation")
-	}
-
 	pricePerSector, err := uploader.market.PricePerSector(&bind.CallOpts{Context: ctx})
 	if err != nil {
 		return nil, errors.WithMessage(err, "Failed to read price per sector for batch fee estimation")
@@ -678,7 +685,7 @@ func (uploader *Uploader) EstimateBatchFee(ctx context.Context, datas []core.Ite
 	total := big.NewInt(0)
 	for i := 0; i < len(datas); i++ {
 		flow := core.NewFlow(datas[i], tags[i])
-		submission, err := flow.CreateSubmission(submitter)
+		submission, err := flow.CreateSubmission(common.Address{})
 		if err != nil {
 			return nil, errors.WithMessagef(err, "Failed to create flow submission for fee estimation at index %d", i)
 		}
