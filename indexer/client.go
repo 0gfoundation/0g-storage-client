@@ -111,16 +111,17 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 	}
 
 	trustedNodes := fetchNodes(allNodes.Trusted)
-	discoveredNodes := fetchNodes(allNodes.Discovered)
+	discoveredSelected := make([]*shard.ShardedNode, 0)	
 
 	discoveredReplica := uint(0)
 	if !fullTrusted {
 		discoveredReplica = uint(expectedReplica) * 3 / 5
-	}
 
-	discoveredSelected, _ := shard.Select(discoveredNodes, discoveredReplica, method)
-	if len(discoveredSelected) == 0 {
-		discoveredReplica = 0
+		discoveredNodes := fetchNodes(allNodes.Discovered)
+		discoveredSelected, _ := shard.Select(discoveredNodes, discoveredReplica, method)
+		if len(discoveredSelected) == 0 {
+			discoveredReplica = 0
+		}
 	}
 
 	trustedSelected, ok := shard.Select(trustedNodes, expectedReplica-discoveredReplica, method)
@@ -135,12 +136,16 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 			trustedClients = append(trustedClients, client)
 		}
 	}
-
-	discoveredClients := make([]*node.ZgsClient, 0, len(discoveredSelected))
-	for _, shardedNode := range discoveredSelected {
-		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
-		if err == nil {
-			discoveredClients = append(discoveredClients, client)
+	
+	var discoveredClients []*node.ZgsClient
+	if discoveredReplica > 0 {
+		
+		discoveredClients := make([]*node.ZgsClient, 0, len(discoveredSelected))
+		for _, shardedNode := range discoveredSelected {
+			client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+			if err == nil {
+				discoveredClients = append(discoveredClients, client)
+			}
 		}
 	}
 

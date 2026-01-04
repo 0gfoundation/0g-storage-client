@@ -13,6 +13,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/indexer"
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/openweb3/web3go"
 	"github.com/pkg/errors"
@@ -63,6 +64,9 @@ type uploadArgument struct {
 	fullTrusted  bool
 
 	timeout time.Duration
+
+	flowAddress   string
+	marketAddress string
 }
 
 func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
@@ -91,6 +95,9 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().BoolVar(&args.fullTrusted, "full-trusted", true, "whether to use full trusted nodes")
 
 	cmd.Flags().DurationVar(&args.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
+
+	cmd.Flags().StringVar(&args.flowAddress, "flow-address", "", "Flow contract address (skip storage node status call when set)")
+	cmd.Flags().StringVar(&args.marketAddress, "market-address", "", "Market contract address (optional, skip flow lookup when set)")
 }
 
 var (
@@ -199,6 +206,26 @@ func upload(*cobra.Command, []string) {
 }
 
 func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3client *web3go.Client, opt transfer.UploadOption) (*transfer.Uploader, func(), error) {
+	var contractConfig *transfer.UploaderContractConfig
+	if args.flowAddress != "" {
+		if !common.IsHexAddress(args.flowAddress) {
+			return nil, nil, errors.Errorf("invalid flow address: %s", args.flowAddress)
+		}
+		flowAddr := common.HexToAddress(args.flowAddress)
+		contractConfig = &transfer.UploaderContractConfig{
+			FlowAddress: &flowAddr,
+		}
+		if args.marketAddress != "" {
+			if !common.IsHexAddress(args.marketAddress) {
+				return nil, nil, errors.Errorf("invalid market address: %s", args.marketAddress)
+			}
+			marketAddr := common.HexToAddress(args.marketAddress)
+			contractConfig.MarketAddress = &marketAddr
+		}
+	} else if args.marketAddress != "" {
+		return nil, nil, errors.New("market-address requires flow-address")
+	}
+
 	if args.indexer != "" {
 		indexerClient, err := indexer.NewClient(args.indexer, indexer.IndexerClientOption{
 			ProviderOption: providerOption,
@@ -223,7 +250,7 @@ func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3clie
 		}
 	}
 
-	up, err := transfer.NewUploader(ctx, w3client, &transfer.SelectedNodes{Trusted: clients}, zg_common.LogOption{Logger: logrus.StandardLogger()})
+	up, err := transfer.NewUploaderWithContractConfig(ctx, w3client, &transfer.SelectedNodes{Trusted: clients}, contractConfig, zg_common.LogOption{Logger: logrus.StandardLogger()})
 	if err != nil {
 		closer()
 		return nil, nil, err

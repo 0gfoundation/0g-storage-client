@@ -58,6 +58,12 @@ type SelectedNodes struct {
 	Discovered []*node.ZgsClient
 }
 
+// UploaderContractConfig optionally pins contract addresses to avoid fetching them from storage nodes.
+type UploaderContractConfig struct {
+	FlowAddress   *common.Address
+	MarketAddress *common.Address
+}
+
 // UploadOption upload option for a file
 type UploadOption struct {
 	Tags             []byte              // transaction tags
@@ -120,34 +126,68 @@ func getShardConfigs(ctx context.Context, clients []*node.ZgsClient) ([]*shard.S
 	return shardConfigs, nil
 }
 
+func statusClient(clients *SelectedNodes) (*node.ZgsClient, error) {
+	if len(clients.Trusted) > 0 {
+		return clients.Trusted[0], nil
+	}
+	if len(clients.Discovered) > 0 {
+		return clients.Discovered[0], nil
+	}
+	return nil, errors.New("Storage node not specified")
+}
+
 // NewUploader Initialize a new uploader.
 func NewUploader(ctx context.Context, w3Client *web3go.Client, clients *SelectedNodes, opts ...zg_common.LogOption) (*Uploader, error) {
+	return NewUploaderWithContractConfig(ctx, w3Client, clients, nil, opts...)
+}
+
+// NewUploaderWithContractConfig initializes a new uploader with optional contract addresses.
+func NewUploaderWithContractConfig(ctx context.Context, w3Client *web3go.Client, clients *SelectedNodes, contractConfig *UploaderContractConfig, opts ...zg_common.LogOption) (*Uploader, error) {
 	if len(clients.Trusted) == 0 && len(clients.Discovered) == 0 {
 		return nil, errors.New("Storage node not specified")
 	}
 
-	status, err := clients.Trusted[0].GetStatus(context.Background())
-	if err != nil {
-		return nil, errors.WithMessagef(err, "Failed to get status from storage node %v", clients.Trusted[0].URL())
+	var flowAddress common.Address
+	if contractConfig != nil && contractConfig.FlowAddress != nil {
+		flowAddress = *contractConfig.FlowAddress
+	} else {
+		statusNode, err := statusClient(clients)
+		if err != nil {
+			return nil, err
+		}
+		status, err := statusNode.GetStatus(context.Background())
+		if err != nil {
+			return nil, errors.WithMessagef(err, "Failed to get status from storage node %v", statusNode.URL())
+		}
+
+		chainId, err := w3Client.Eth.ChainId()
+		if err != nil {
+			return nil, errors.WithMessage(err, "Failed to get chain ID from blockchain node")
+		}
+
+		if chainId != nil && *chainId != status.NetworkIdentity.ChainId {
+			return nil, errors.Errorf("Chain ID mismatch, blockchain = %v, storage node = %v", *chainId, status.NetworkIdentity.ChainId)
+		}
+		flowAddress = status.NetworkIdentity.FlowContractAddress
 	}
 
-	chainId, err := w3Client.Eth.ChainId()
-	if err != nil {
-		return nil, errors.WithMessage(err, "Failed to get chain ID from blockchain node")
-	}
-
-	if chainId != nil && *chainId != status.NetworkIdentity.ChainId {
-		return nil, errors.Errorf("Chain ID mismatch, blockchain = %v, storage node = %v", *chainId, status.NetworkIdentity.ChainId)
-	}
-
-	flow, err := contract.NewFlowContract(status.NetworkIdentity.FlowContractAddress, w3Client)
+	flow, err := contract.NewFlowContract(flowAddress, w3Client)
 	if err != nil {
 		return nil, errors.WithMessage(err, "Failed to create flow contract")
 	}
 
-	market, err := flow.GetMarketContract(ctx)
-	if err != nil {
-		return nil, errors.WithMessagef(err, "Failed to get market contract from flow contract %v", status.NetworkIdentity.FlowContractAddress)
+	var market *contract.Market
+	if contractConfig != nil && contractConfig.MarketAddress != nil {
+		backend, _ := w3Client.ToClientForContract()
+		market, err = contract.NewMarket(*contractConfig.MarketAddress, backend)
+		if err != nil {
+			return nil, errors.WithMessage(err, "Failed to create market contract")
+		}
+	} else {
+		market, err = flow.GetMarketContract(ctx)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "Failed to get market contract from flow contract %v", flowAddress)
+		}
 	}
 
 	uploader := &Uploader{
