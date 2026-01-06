@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
-	"time"
 
 	"github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/common/rpc"
@@ -83,48 +81,18 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 		return nil, err
 	}
 
-	fetchNodes := func(shardedNodes []*shard.ShardedNode) []*shard.ShardedNode {
-		nodes := make([]*shard.ShardedNode, 0)
-		for _, shardedNode := range shardedNodes {
-			if slices.Contains(dropped, shardedNode.URL) {
-				continue
-			}
-			client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
-			if err != nil {
-				c.logger.Debugf("failed to initialize client of node %v, dropped.", shardedNode.URL)
-				continue
-			}
-			defer client.Close()
-			start := time.Now()
-			config, err := client.GetShardConfig(ctx)
-			if err != nil || !config.IsValid() {
-				c.logger.Debugf("failed to get shard config of node %v, dropped.", shardedNode.URL)
-				continue
-			}
-			nodes = append(nodes, &shard.ShardedNode{
-				URL:     shardedNode.URL,
-				Config:  config,
-				Latency: time.Since(start).Milliseconds(),
-			})
-		}
-		return nodes
-	}
-
-	trustedNodes := fetchNodes(allNodes.Trusted)
 	discoveredSelected := make([]*shard.ShardedNode, 0)	
 
 	discoveredReplica := uint(0)
 	if !fullTrusted {
 		discoveredReplica = uint(expectedReplica) * 3 / 5
-
-		discoveredNodes := fetchNodes(allNodes.Discovered)
-		discoveredSelected, _ := shard.Select(discoveredNodes, discoveredReplica, method)
+		discoveredSelected, _ := shard.Select(allNodes.Discovered, discoveredReplica, method)
 		if len(discoveredSelected) == 0 {
 			discoveredReplica = 0
 		}
 	}
 
-	trustedSelected, ok := shard.Select(trustedNodes, expectedReplica-discoveredReplica, method)
+	trustedSelected, ok := shard.Select(allNodes.Trusted, expectedReplica-discoveredReplica, method)
 	if !ok {
 		return nil, fmt.Errorf("cannot select a subset from the returned nodes that meets the replication requirement")
 	}

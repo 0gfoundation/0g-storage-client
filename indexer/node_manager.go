@@ -86,27 +86,39 @@ func (nm *NodeManager) Trusted() ([]*shard.ShardedNode, error) {
 	clients := nm.TrustedClients()
 
 	var nodes []*shard.ShardedNode
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
 	for _, v := range clients {
-		start := time.Now()
-		config, err := v.GetShardConfig(context.Background())
-		if err != nil {
-			logrus.Debugf("Failed to retrieve shard config from trusted storage node %v, error: %v", v.URL(), err)
-			continue
-		}
+		client := v
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			config, err := client.GetShardConfig(context.Background())
+			if err != nil {
+				logrus.Debugf("Failed to retrieve shard config from trusted storage node %v, error: %v", client.URL(), err)
+				return
+			}
 
-		if !config.IsValid() {
-			logrus.Debugf("Invalid shard config retrieved from trusted storage node %v: %v", v.URL(), config)
-			continue
-		}
+			if !config.IsValid() {
+				logrus.Debugf("Invalid shard config retrieved from trusted storage node %v: %v", client.URL(), config)
+				return
+			}
 
-		nodes = append(nodes, &shard.ShardedNode{
-			URL:     v.URL(),
-			Config:  config,
-			Latency: time.Since(start).Milliseconds(),
-		})
+			node := &shard.ShardedNode{
+				URL:     client.URL(),
+				Config:  config,
+				Latency: time.Since(start).Milliseconds(),
+			}
+
+			mu.Lock()
+			nodes = append(nodes, node)
+			mu.Unlock()
+		}()
 	}
 
+	wg.Wait()
 	return nodes, nil
 }
 
