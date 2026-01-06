@@ -26,6 +26,7 @@ type BatchUploadOption struct {
 	Method      string         // method for selecting nodes, can be "max", "random" or certain positive number in string
 	FullTrusted bool           // whether to use full trusted nodes
 	DataOptions []UploadOption // upload option for single file, nonce and fee are ignored
+	FastMode    bool           // skip waiting for receipt and upload segments by root (recommended for small files)
 }
 
 // BatchUpload submit multiple data to 0g storage contract batchly in single on-chain transaction, then transfer the data to the storage nodes.
@@ -123,41 +124,46 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 	rootSeqMap := make(map[common.Hash]uint64)
 
 	if len(toSubmitDatas) > 0 {
+		waitReceipt := !opts.FastMode
+		receiptFlag := waitReceipt
 		submitOpt := SubmitLogEntryOption{
 			Fee:         opts.Fee,
 			Nonce:       opts.Nonce,
 			MaxGasPrice: opts.MaxGasPrice,
 			NRetries:    opts.NRetries,
 			Step:        opts.Step,
+			WaitReceipt: &receiptFlag,
 		}
 		var err error
 		if txHash, receipt, err = uploader.SubmitLogEntry(ctx, toSubmitDatas, toSubmitTags, submitOpt); err != nil {
 			return txHash, nil, errors.WithMessage(err, "Failed to submit log entry")
 		}
-		seqNums, err := uploader.ParseLogs(ctx, receipt.Logs)
-		if err != nil {
-			return txHash, nil, errors.WithMessage(err, "Failed to parse logs")
-		}
-		// Wait for storage node to retrieve log entry from blockchain
-		if len(seqNums) != len(toSubmitDatas) {
-			return txHash, nil, errors.New("log entry event count mismatch")
-		}
-
-		logIndex := 0
-		for i := 0; i < n; i += 1 {
-			opt := opts.DataOptions[i]
-			if !opt.SkipTx || fileInfos[i] == nil {
-				rootSeqMap[trees[i].Root()] = seqNums[logIndex]
-				logIndex += 1
+		if waitReceipt {
+			seqNums, err := uploader.ParseLogs(ctx, receipt.Logs)
+			if err != nil {
+				return txHash, nil, errors.WithMessage(err, "Failed to parse logs")
 			}
-		}
+			// Wait for storage node to retrieve log entry from blockchain
+			if len(seqNums) != len(toSubmitDatas) {
+				return txHash, nil, errors.New("log entry event count mismatch")
+			}
 
-		if logIndex != len(seqNums) {
-			return txHash, nil, errors.New("log entry event count mismatch after mapping to data")
-		}
+			logIndex := 0
+			for i := 0; i < n; i += 1 {
+				opt := opts.DataOptions[i]
+				if !opt.SkipTx || fileInfos[i] == nil {
+					rootSeqMap[trees[i].Root()] = seqNums[logIndex]
+					logIndex += 1
+				}
+			}
 
-		if _, err := uploader.waitForLogEntry(ctx, lastTreeToSubmit.Root(), TransactionPacked, rootSeqMap[lastTreeToSubmit.Root()]); err != nil {
-			return txHash, nil, errors.WithMessage(err, "Failed to check if log entry available on storage node")
+			if logIndex != len(seqNums) {
+				return txHash, nil, errors.New("log entry event count mismatch after mapping to data")
+			}
+
+			if _, err := uploader.waitForLogEntry(ctx, lastTreeToSubmit.Root(), TransactionPacked, rootSeqMap[lastTreeToSubmit.Root()]); err != nil {
+				return txHash, nil, errors.WithMessage(err, "Failed to check if log entry available on storage node")
+			}
 		}
 	}
 
@@ -166,25 +172,41 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 		go func(i int) {
 			defer wg.Done()
 			info := fileInfos[i]
+			fastMode := opts.FastMode && datas[i].Size() <= fastUploadMaxSize
+			if opts.FastMode && !fastMode {
+				uploader.logger.WithField("size", datas[i].Size()).Info("Fast mode disabled for data size over limit")
+			}
+
+			if fastMode && info == nil {
+				if err := uploader.uploadFileByRoot(ctx, datas[i], trees[i], opts.DataOptions[i].ExpectedReplica, opts.DataOptions[i].TaskSize, opts.DataOptions[i].Method); err != nil {
+					errs <- errors.WithMessage(err, "Failed to upload file")
+					return
+				}
+				errs <- nil
+				return
+			}
+
 			if info == nil {
 				var err error
 				info, err = uploader.waitForLogEntry(ctx, trees[i].Root(), TransactionPacked, rootSeqMap[trees[i].Root()])
-
 				if err != nil {
 					errs <- errors.WithMessage(err, "Failed to get file info from storage node")
 					return
 				}
 			}
+
 			// Upload file to storage node
 			if err := uploader.uploadFile(ctx, info, datas[i], trees[i], opts.DataOptions[i].ExpectedReplica, opts.DataOptions[i].TaskSize, opts.DataOptions[i].Method); err != nil {
 				errs <- errors.WithMessage(err, "Failed to upload file")
 				return
 			}
 
-			// Wait for transaction finality
-			if _, err := uploader.waitForLogEntry(ctx, trees[i].Root(), opts.DataOptions[i].FinalityRequired, info.Tx.Seq); err != nil {
-				errs <- errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
-				return
+			if !fastMode {
+				// Wait for transaction finality
+				if _, err := uploader.waitForLogEntry(ctx, trees[i].Root(), opts.DataOptions[i].FinalityRequired, info.Tx.Seq); err != nil {
+					errs <- errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
+					return
+				}
 			}
 			errs <- nil
 		}(i)

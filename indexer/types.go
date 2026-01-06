@@ -19,6 +19,8 @@ type FileLocation struct {
 type Interface interface {
 	GetShardedNodes(ctx context.Context) (ShardedNodes, error)
 
+	GetSelectedNodes(ctx context.Context, expectedReplica uint, method string, fullTrusted bool, dropped []string) (ShardedNodes, error)
+
 	GetNodeLocations(ctx context.Context) (map[string]*IPLocation, error)
 
 	GetFileLocations(ctx context.Context, root string) ([]*shard.ShardedNode, error)

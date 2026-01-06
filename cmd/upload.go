@@ -55,6 +55,7 @@ type uploadArgument struct {
 	finalityRequired bool
 	taskSize         uint
 	routines         int
+	fastMode         bool
 
 	fragmentSize int64
 	maxGasPrice  uint
@@ -84,6 +85,7 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().BoolVar(&args.skipTx, "skip-tx", true, "Skip sending the transaction on chain if already exists")
 	cmd.Flags().BoolVar(&args.finalityRequired, "finality-required", false, "Wait for file finality on nodes to upload")
 	cmd.Flags().UintVar(&args.taskSize, "task-size", 10, "Number of segments to upload in single rpc request")
+	cmd.Flags().BoolVar(&args.fastMode, "fast-mode", true, "Enable fast mode (no receipt wait, root-based upload for small files)")
 
 	cmd.Flags().Int64Var(&args.fragmentSize, "fragment-size", 1024*1024*1024*4, "the size of fragment to split into when file is too large")
 
@@ -159,6 +161,7 @@ func upload(*cobra.Command, []string) {
 		Step:             uploadArgs.step,
 		Method:           uploadArgs.method,
 		FullTrusted:      uploadArgs.fullTrusted,
+		FastMode:         uploadArgs.fastMode,
 	}
 
 	file, err := core.Open(uploadArgs.file)
@@ -235,7 +238,7 @@ func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3clie
 			return nil, nil, errors.WithMessage(err, "failed to initialize indexer client")
 		}
 
-		up, err := indexerClient.NewUploaderFromIndexerNodes(ctx, segNum, w3client, opt.ExpectedReplica, nil, opt.Method, opt.FullTrusted)
+		up, err := indexerClient.NewUploaderFromIndexerNodesWithContractConfig(ctx, segNum, w3client, opt.ExpectedReplica, nil, opt.Method, opt.FullTrusted, contractConfig)
 		if err != nil {
 			return nil, nil, err
 		}

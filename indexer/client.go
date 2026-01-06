@@ -64,6 +64,11 @@ func (c *Client) GetShardedNodes(ctx context.Context) (ShardedNodes, error) {
 	return providers.CallContext[ShardedNodes](c, ctx, "indexer_getShardedNodes")
 }
 
+// GetSelectedNodes get selected nodes from indexer service
+func (c *Client) GetSelectedNodes(ctx context.Context, expectedReplica uint, method string, fullTrusted bool, dropped []string) (ShardedNodes, error) {
+	return providers.CallContext[ShardedNodes](c, ctx, "indexer_getSelectedNodes", expectedReplica, method, fullTrusted, dropped)
+}
+
 // GetNodeLocations return storage nodes with IP location information.
 func (c *Client) GetNodeLocations(ctx context.Context) (map[string]*IPLocation, error) {
 	return providers.CallContext[map[string]*IPLocation](c, ctx, "indexer_getNodeLocations")
@@ -76,46 +81,32 @@ func (c *Client) GetFileLocations(ctx context.Context, root string) ([]*shard.Sh
 
 // SelectNodes selects nodes from both trusted and discovered, with discovered max 3/5 of expectedReplica. If discovered cannot meet, all from trusted.
 func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped []string, method string, fullTrusted bool) (*transfer.SelectedNodes, error) {
-	allNodes, err := c.GetShardedNodes(ctx)
+	logrus.Info("Selecting nodes ...")
+	allNodes, err := c.GetSelectedNodes(ctx, expectedReplica, method, fullTrusted, dropped)
 	if err != nil {
 		return nil, err
 	}
 
-	discoveredSelected := make([]*shard.ShardedNode, 0)	
-
-	discoveredReplica := uint(0)
-	if !fullTrusted {
-		discoveredReplica = uint(expectedReplica) * 3 / 5
-		discoveredSelected, _ := shard.Select(allNodes.Discovered, discoveredReplica, method)
-		if len(discoveredSelected) == 0 {
-			discoveredReplica = 0
-		}
-	}
-
-	trustedSelected, ok := shard.Select(allNodes.Trusted, expectedReplica-discoveredReplica, method)
-	if !ok {
-		return nil, fmt.Errorf("cannot select a subset from the returned nodes that meets the replication requirement")
-	}
-
-	trustedClients := make([]*node.ZgsClient, 0, len(trustedSelected))
-	for _, shardedNode := range trustedSelected {
+	trustedClients := make([]*node.ZgsClient, 0, len(allNodes.Trusted))
+	for _, shardedNode := range allNodes.Trusted {
 		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
 		if err == nil {
 			trustedClients = append(trustedClients, client)
 		}
 	}
-	
+
 	var discoveredClients []*node.ZgsClient
-	if discoveredReplica > 0 {
-		
-		discoveredClients := make([]*node.ZgsClient, 0, len(discoveredSelected))
-		for _, shardedNode := range discoveredSelected {
+	if len(allNodes.Discovered) > 0 {
+		discoveredClients = make([]*node.ZgsClient, 0, len(allNodes.Discovered))
+		for _, shardedNode := range allNodes.Discovered {
 			client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
 			if err == nil {
 				discoveredClients = append(discoveredClients, client)
 			}
 		}
 	}
+
+	logrus.Info("Selected Nodes...")
 
 	return &transfer.SelectedNodes{
 		Trusted:    trustedClients,
@@ -125,13 +116,18 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 
 // NewUploaderFromIndexerNodes return an uploader with selected storage nodes from indexer service.
 func (c *Client) NewUploaderFromIndexerNodes(ctx context.Context, segNum uint64, w3Client *web3go.Client, expectedReplica uint, dropped []string, method string, fullTrusted bool) (*transfer.Uploader, error) {
+	return c.NewUploaderFromIndexerNodesWithContractConfig(ctx, segNum, w3Client, expectedReplica, dropped, method, fullTrusted, nil)
+}
+
+// NewUploaderFromIndexerNodesWithContractConfig returns an uploader with selected storage nodes and optional contract config.
+func (c *Client) NewUploaderFromIndexerNodesWithContractConfig(ctx context.Context, segNum uint64, w3Client *web3go.Client, expectedReplica uint, dropped []string, method string, fullTrusted bool, contractConfig *transfer.UploaderContractConfig) (*transfer.Uploader, error) {
 	selected, err := c.SelectNodes(ctx, expectedReplica, dropped, method, fullTrusted)
 	if err != nil {
 		return nil, err
 	}
 
 	c.logger.Infof("get storage nodes from indexer (trusted: %v, discovered: %v)", len(selected.Trusted), len(selected.Discovered))
-	return transfer.NewUploader(ctx, w3Client, selected, c.option.LogOption)
+	return transfer.NewUploaderWithContractConfig(ctx, w3Client, selected, contractConfig, c.option.LogOption)
 }
 
 // Upload submit data to 0g storage contract, then transfer the data to the storage nodes selected from indexer service.
