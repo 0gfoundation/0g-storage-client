@@ -63,7 +63,8 @@ func (f *FlowContract) GetNonce(ctx context.Context) (*big.Int, error) {
 
 	addr := sm.List()[0].Address()
 
-	nonce, err := f.clientWithSigner.Eth.TransactionCount(addr, nil)
+	pending := types.BlockNumberOrHashWithNumber(types.PendingBlockNumber)
+	nonce, err := f.clientWithSigner.Eth.TransactionCount(addr, &pending)
 	if err != nil {
 		return nil, err
 	}
