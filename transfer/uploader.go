@@ -285,8 +285,8 @@ func (uploader *Uploader) uploadFast(ctx context.Context, data core.IterableData
 func (uploader *Uploader) uploadSlow(ctx context.Context, data core.IterableData, tree *merkle.Tree, info *node.FileInfo, opt UploadOption, stageTimer time.Time) (common.Hash, common.Hash, error) {
 	txHash := common.Hash{}
 	if !opt.SkipTx || info == nil {
-		uploader.logger.WithField("root", tree.Root()).Info("Prepare to submit log entry")
 		if data.Size() <= fastUploadMaxSize && info == nil {
+			uploader.logger.WithField("root", tree.Root()).Info("Upload/Transaction in parallel")
 			txHash, err := uploader.uploadSlowParallel(ctx, data, tree, opt)
 			if err != nil {
 				return txHash, tree.Root(), err
@@ -294,7 +294,8 @@ func (uploader *Uploader) uploadSlow(ctx context.Context, data core.IterableData
 			uploader.logger.WithField("duration", time.Since(stageTimer)).Info("upload took")
 			return txHash, tree.Root(), nil
 		}
-
+		
+		uploader.logger.WithField("root", tree.Root()).Info("Prepare to submit log entry")
 		var err error
 		txHash, info, err = uploader.submitLogEntryAndWait(ctx, data, tree, opt)
 		if err != nil {
