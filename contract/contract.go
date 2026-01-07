@@ -150,8 +150,6 @@ func TransactWithGasAdjustment(
 		retryOpts.Timeout = time.Until(t)
 	}
 
-	logrus.WithField("timeout", retryOpts.Timeout).WithField("maxNonGasRetries", retryOpts.MaxNonGasRetries).Debug("Set retry options")
-
 	if opts.Nonce == nil {
 		// Get the current nonce if not set.
 		nonce, err := contract.GetNonce(opts.Context)
@@ -161,8 +159,6 @@ func TransactWithGasAdjustment(
 		// add one to the nonce
 		opts.Nonce = nonce
 	}
-
-	logrus.WithField("nonce", opts.Nonce).Info("Set nonce")
 
 	if opts.GasPrice == nil {
 		// Get the current gas price if not set.
@@ -174,7 +170,12 @@ func TransactWithGasAdjustment(
 		logrus.WithField("gasPrice", opts.GasPrice).Debug("Receive current gas price from chain node")
 	}
 
-	logrus.WithField("gasPrice", opts.GasPrice).Info("Set gas price")
+	logrus.WithFields(logrus.Fields{
+		"timeout":          retryOpts.Timeout,
+		"maxNonGasRetries": retryOpts.MaxNonGasRetries,
+		"nonce":            opts.Nonce,
+		"gasPrice":         opts.GasPrice,
+	}).Info("Set tx params")
 
 	receiptCh := make(chan *types.Receipt, 1)
 	errCh := make(chan error, 1)
@@ -312,31 +313,12 @@ func TransactWithGasAdjustmentNoReceipt(
 		retryOpts.Timeout = time.Until(t)
 	}
 
-	logrus.WithField("timeout", retryOpts.Timeout).WithField("maxNonGasRetries", retryOpts.MaxNonGasRetries).Debug("Set retry options")
-
-	if opts.Nonce == nil {
-		// Get the current nonce if not set.
-		nonce, err := contract.GetNonce(opts.Context)
-		if err != nil {
-			return nil, err
-		}
-		// add one to the nonce
-		opts.Nonce = nonce
-	}
-
-	logrus.WithField("nonce", opts.Nonce).Info("Set nonce")
-
-	if opts.GasPrice == nil {
-		// Get the current gas price if not set.
-		gasPrice, err := contract.GetGasPrice()
-		if err != nil {
-			return nil, errors.WithMessage(err, "failed to get gas price")
-		}
-		opts.GasPrice = gasPrice
-		logrus.WithField("gasPrice", opts.GasPrice).Debug("Receive current gas price from chain node")
-	}
-
-	logrus.WithField("gasPrice", opts.GasPrice).Info("Set gas price")
+	logrus.WithFields(logrus.Fields{
+		"timeout":          retryOpts.Timeout,
+		"maxNonGasRetries": retryOpts.MaxNonGasRetries,
+		"nonce":            opts.Nonce,
+		"gasPrice":         opts.GasPrice,
+	}).Info("Set tx params")
 
 	nRetries := 0
 	for {

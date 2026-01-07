@@ -246,76 +246,169 @@ func (uploader *Uploader) Upload(ctx context.Context, data core.IterableData, op
 	if err != nil {
 		return common.Hash{}, tree.Root(), errors.WithMessage(err, "Failed to check if skipped log entry available on storage node")
 	}
+	if fastMode {
+		return uploader.uploadFast(ctx, data, tree, info, opt, stageTimer)
+	}
+
+	return uploader.uploadSlow(ctx, data, tree, info, opt, stageTimer)
+}
+
+func (uploader *Uploader) uploadFast(ctx context.Context, data core.IterableData, tree *merkle.Tree, info *node.FileInfo, opt UploadOption, stageTimer time.Time) (common.Hash, common.Hash, error) {
 	txHash := common.Hash{}
-	// Append log on blockchain
 	if !opt.SkipTx || info == nil {
 		uploader.logger.WithField("root", tree.Root()).Info("Prepare to submit log entry")
-		// Submit log entry to smart contract.
-		waitReceipt := true
-		if fastMode {
-			waitReceipt = false
-		}
-		receiptFlag := waitReceipt
-		submitOpts := SubmitLogEntryOption{
-			Fee:         opt.Fee,
-			Nonce:       opt.Nonce,
-			MaxGasPrice: opt.MaxGasPrice,
-			NRetries:    opt.NRetries,
-			Step:        opt.Step,
-			WaitReceipt: &receiptFlag,
-		}
-		var receipt *types.Receipt
-		txHash, receipt, err = uploader.SubmitLogEntry(ctx, []core.IterableData{data}, [][]byte{opt.Tags}, submitOpts)
+		var err error
+		txHash, err = uploader.submitLogEntryNoReceipt(ctx, data, opt)
 		if err != nil {
-			return txHash, tree.Root(), errors.WithMessage(err, "Failed to submit log entry")
-		}
-
-		if waitReceipt {
-			if receipt == nil || receipt.Logs == nil || len(receipt.Logs) == 0 {
-				return txHash, tree.Root(), errors.New("missing transaction receipt logs")
-			}
-
-			seqNums, err := uploader.ParseLogs(ctx, receipt.Logs)
-			if err != nil {
-				return txHash, tree.Root(), errors.WithMessage(err, "Failed to parse logs")
-			}
-			if len(seqNums) != 1 {
-				return txHash, tree.Root(), errors.New("log entry event count mismatch")
-			}
-
-			// Wait for storage node to retrieve log entry from blockchain
-			info, err = uploader.waitForLogEntry(ctx, tree.Root(), TransactionPacked, seqNums[0])
-			if err != nil {
-				return txHash, tree.Root(), errors.WithMessage(err, "Failed to check if log entry available on storage node")
-			}
+			return txHash, tree.Root(), err
 		}
 	}
 
-	if fastMode && info == nil {
+	if info == nil {
 		if err := uploader.uploadFileByRoot(ctx, data, tree, opt.ExpectedReplica, opt.TaskSize, opt.Method); err != nil {
 			return txHash, tree.Root(), errors.WithMessage(err, "Failed to upload file")
 		}
 
 		uploader.logger.WithField("duration", time.Since(stageTimer)).Info("upload took")
-
 		return txHash, tree.Root(), nil
 	}
 
-	// Upload file to storage node
 	if err := uploader.uploadFile(ctx, info, data, tree, opt.ExpectedReplica, opt.TaskSize, opt.Method); err != nil {
 		return txHash, tree.Root(), errors.WithMessage(err, "Failed to upload file")
-	}
-
-	// Wait for transaction finality
-	if !fastMode {
-		if _, err = uploader.waitForLogEntry(ctx, tree.Root(), opt.FinalityRequired, info.Tx.Seq); err != nil {
-			return txHash, tree.Root(), errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
-		}
 	}
 
 	uploader.logger.WithField("duration", time.Since(stageTimer)).Info("upload took")
 
 	return txHash, tree.Root(), nil
+}
+
+func (uploader *Uploader) uploadSlow(ctx context.Context, data core.IterableData, tree *merkle.Tree, info *node.FileInfo, opt UploadOption, stageTimer time.Time) (common.Hash, common.Hash, error) {
+	txHash := common.Hash{}
+	if !opt.SkipTx || info == nil {
+		uploader.logger.WithField("root", tree.Root()).Info("Prepare to submit log entry")
+		if data.Size() <= fastUploadMaxSize && info == nil {
+			txHash, err := uploader.uploadSlowParallel(ctx, data, tree, opt)
+			if err != nil {
+				return txHash, tree.Root(), err
+			}
+			uploader.logger.WithField("duration", time.Since(stageTimer)).Info("upload took")
+			return txHash, tree.Root(), nil
+		}
+
+		var err error
+		txHash, info, err = uploader.submitLogEntryAndWait(ctx, data, tree, opt)
+		if err != nil {
+			return txHash, tree.Root(), err
+		}
+	}
+
+	if err := uploader.uploadFile(ctx, info, data, tree, opt.ExpectedReplica, opt.TaskSize, opt.Method); err != nil {
+		return txHash, tree.Root(), errors.WithMessage(err, "Failed to upload file")
+	}
+
+	if _, err := uploader.waitForLogEntry(ctx, tree.Root(), opt.FinalityRequired, info.Tx.Seq); err != nil {
+		return txHash, tree.Root(), errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
+	}
+
+	uploader.logger.WithField("duration", time.Since(stageTimer)).Info("upload took")
+
+	return txHash, tree.Root(), nil
+}
+
+func (uploader *Uploader) uploadSlowParallel(ctx context.Context, data core.IterableData, tree *merkle.Tree, opt UploadOption) (common.Hash, error) {
+	type submitResult struct {
+		txHash common.Hash
+		err    error
+	}
+	submitCh := make(chan submitResult, 1)
+	uploadCh := make(chan error, 1)
+
+	go func() {
+		txHash, err := uploader.submitLogEntryAndFinalize(ctx, data, tree, opt)
+		submitCh <- submitResult{txHash: txHash, err: err}
+	}()
+
+	go func() {
+		uploadCh <- uploader.uploadFileByRoot(ctx, data, tree, opt.ExpectedReplica, opt.TaskSize, opt.Method)
+	}()
+
+	submitRes := <-submitCh
+	uploadErr := <-uploadCh
+	if uploadErr != nil {
+		return submitRes.txHash, errors.WithMessage(uploadErr, "Failed to upload file")
+	}
+	if submitRes.err != nil {
+		return submitRes.txHash, submitRes.err
+	}
+
+	return submitRes.txHash, nil
+}
+
+func (uploader *Uploader) submitLogEntryNoReceipt(ctx context.Context, data core.IterableData, opt UploadOption) (common.Hash, error) {
+	waitReceipt := false
+	receiptFlag := waitReceipt
+	submitOpts := SubmitLogEntryOption{
+		Fee:         opt.Fee,
+		Nonce:       opt.Nonce,
+		MaxGasPrice: opt.MaxGasPrice,
+		NRetries:    opt.NRetries,
+		Step:        opt.Step,
+		WaitReceipt: &receiptFlag,
+	}
+	txHash, _, err := uploader.SubmitLogEntry(ctx, []core.IterableData{data}, [][]byte{opt.Tags}, submitOpts)
+	if err != nil {
+		return txHash, errors.WithMessage(err, "Failed to submit log entry")
+	}
+	return txHash, nil
+}
+
+func (uploader *Uploader) submitLogEntryAndWait(ctx context.Context, data core.IterableData, tree *merkle.Tree, opt UploadOption) (common.Hash, *node.FileInfo, error) {
+	waitReceipt := true
+	receiptFlag := waitReceipt
+	submitOpts := SubmitLogEntryOption{
+		Fee:         opt.Fee,
+		Nonce:       opt.Nonce,
+		MaxGasPrice: opt.MaxGasPrice,
+		NRetries:    opt.NRetries,
+		Step:        opt.Step,
+		WaitReceipt: &receiptFlag,
+	}
+
+	txHash, receipt, err := uploader.SubmitLogEntry(ctx, []core.IterableData{data}, [][]byte{opt.Tags}, submitOpts)
+	if err != nil {
+		return txHash, nil, errors.WithMessage(err, "Failed to submit log entry")
+	}
+	if receipt == nil || receipt.Logs == nil || len(receipt.Logs) == 0 {
+		return txHash, nil, errors.New("missing transaction receipt logs")
+	}
+
+	seqNums, err := uploader.ParseLogs(ctx, receipt.Logs)
+	if err != nil {
+		return txHash, nil, errors.WithMessage(err, "Failed to parse logs")
+	}
+	if len(seqNums) != 1 {
+		return txHash, nil, errors.New("log entry event count mismatch")
+	}
+
+	info, err := uploader.waitForLogEntry(ctx, tree.Root(), TransactionPacked, seqNums[0])
+	if err != nil {
+		return txHash, nil, errors.WithMessage(err, "Failed to check if log entry available on storage node")
+	}
+
+	return txHash, info, nil
+}
+
+func (uploader *Uploader) submitLogEntryAndFinalize(ctx context.Context, data core.IterableData, tree *merkle.Tree, opt UploadOption) (common.Hash, error) {
+	txHash, info, err := uploader.submitLogEntryAndWait(ctx, data, tree, opt)
+	if err != nil {
+		return txHash, err
+	}
+
+	if _, err := uploader.waitForLogEntry(ctx, tree.Root(), opt.FinalityRequired, info.Tx.Seq); err != nil {
+		return txHash, errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
+	}
+
+	return txHash, nil
 }
 
 func (uploader *Uploader) UploadFile(ctx context.Context, path string, option ...UploadOption) (txnHash common.Hash, rootHash common.Hash, err error) {
@@ -372,7 +465,7 @@ func (uploader *Uploader) SubmitLogEntry(ctx context.Context, datas []core.Itera
 		}
 	}
 
-	uploader.logger.WithField("fee(neuron)", opts.Value).Info("batch submit with fee")
+	uploader.logger.WithField("fee(neuron)", opts.Value).Info("submit with fee")
 
 	method := "batchSubmit"
 	params := []any{submissions}
