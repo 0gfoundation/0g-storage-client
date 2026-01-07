@@ -27,6 +27,7 @@ import (
 const defaultTaskSize = uint(10)
 const defaultBatchSize = uint(10)
 const fastUploadMaxSize = int64(10 * 1024 * 1024)
+const defaultLogEntryWaitTimeout = 10 * time.Minute
 
 type FinalityRequirement uint
 
@@ -294,7 +295,7 @@ func (uploader *Uploader) uploadSlow(ctx context.Context, data core.IterableData
 			uploader.logger.WithField("duration", time.Since(stageTimer)).Info("upload took")
 			return txHash, tree.Root(), nil
 		}
-		
+
 		uploader.logger.WithField("root", tree.Root()).Info("Prepare to submit log entry")
 		var err error
 		txHash, info, err = uploader.submitLogEntryAndWait(ctx, data, tree, opt)
@@ -317,32 +318,61 @@ func (uploader *Uploader) uploadSlow(ctx context.Context, data core.IterableData
 }
 
 func (uploader *Uploader) uploadSlowParallel(ctx context.Context, data core.IterableData, tree *merkle.Tree, opt UploadOption) (common.Hash, error) {
-	type submitResult struct {
-		txHash common.Hash
-		err    error
+	txHash, err := uploader.submitLogEntryNoReceipt(ctx, data, opt)
+	if err != nil {
+		return txHash, err
 	}
-	submitCh := make(chan submitResult, 1)
+
+	uploadCtx, cancelUpload := context.WithCancel(ctx)
+	defer cancelUpload()
+
 	uploadCh := make(chan error, 1)
+	receiptCh := make(chan error, 1)
 
 	go func() {
-		txHash, err := uploader.submitLogEntryAndFinalize(ctx, data, tree, opt)
-		submitCh <- submitResult{txHash: txHash, err: err}
+		if err := uploader.uploadFileByRoot(uploadCtx, data, tree, opt.ExpectedReplica, opt.TaskSize, opt.Method); err != nil {
+			uploadCh <- errors.WithMessage(err, "Failed to upload file")
+			return
+		}
+		uploadCh <- uploader.waitForLogEntryByRoot(uploadCtx, tree.Root(), opt.FinalityRequired)
 	}()
 
 	go func() {
-		uploadCh <- uploader.uploadFileByRoot(ctx, data, tree, opt.ExpectedReplica, opt.TaskSize, opt.Method)
+		_, err := uploader.flow.WaitForReceipt(uploadCtx, txHash, true)
+		receiptCh <- err
 	}()
 
-	submitRes := <-submitCh
-	uploadErr := <-uploadCh
-	if uploadErr != nil {
-		return submitRes.txHash, errors.WithMessage(uploadErr, "Failed to upload file")
-	}
-	if submitRes.err != nil {
-		return submitRes.txHash, submitRes.err
-	}
+	var afterReceiptTimer *time.Timer
+	var afterReceiptC <-chan time.Time
 
-	return submitRes.txHash, nil
+	for {
+		select {
+		case err := <-uploadCh:
+			if err != nil {
+				cancelUpload()
+				return txHash, err
+			}
+			if afterReceiptTimer != nil {
+				afterReceiptTimer.Stop()
+			}
+			return txHash, nil
+		case err := <-receiptCh:
+			if err != nil {
+				cancelUpload()
+				return txHash, err
+			}
+			if afterReceiptTimer == nil {
+				afterReceiptTimer = time.NewTimer(defaultLogEntryWaitTimeout)
+				afterReceiptC = afterReceiptTimer.C
+			}
+		case <-afterReceiptC:
+			cancelUpload()
+			return txHash, errors.New("timeout waiting for upload and log entry after receipt")
+		case <-ctx.Done():
+			cancelUpload()
+			return txHash, ctx.Err()
+		}
+	}
 }
 
 func (uploader *Uploader) submitLogEntryNoReceipt(ctx context.Context, data core.IterableData, opt UploadOption) (common.Hash, error) {
@@ -399,17 +429,53 @@ func (uploader *Uploader) submitLogEntryAndWait(ctx context.Context, data core.I
 	return txHash, info, nil
 }
 
-func (uploader *Uploader) submitLogEntryAndFinalize(ctx context.Context, data core.IterableData, tree *merkle.Tree, opt UploadOption) (common.Hash, error) {
-	txHash, info, err := uploader.submitLogEntryAndWait(ctx, data, tree, opt)
-	if err != nil {
-		return txHash, err
-	}
+func (uploader *Uploader) waitForLogEntryByRoot(ctx context.Context, root common.Hash, finalityRequired FinalityRequirement) error {
+	uploader.logger.WithFields(logrus.Fields{
+		"root":     root,
+		"finality": finalityRequired,
+	}).Info("Wait for log entry on storage node by root")
 
-	if _, err := uploader.waitForLogEntry(ctx, tree.Root(), opt.FinalityRequired, info.Tx.Seq); err != nil {
-		return txHash, errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
-	}
+	reminder := util.NewReminder(uploader.logger, time.Minute)
+	clients := append(uploader.clients.Trusted, uploader.clients.Discovered...)
+	txSeqOrRoot := node.TxSeqOrRoot{Root: root}
 
-	return txHash, nil
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+
+		ok := true
+		for _, client := range clients {
+			finalized, err := client.CheckFileFinalized(ctx, txSeqOrRoot)
+			if err != nil {
+				return err
+			}
+			if finalized == nil {
+				fields := logrus.Fields{}
+				if status, err := client.GetStatus(ctx); err == nil {
+					fields["zgsNodeSyncHeight"] = status.LogSyncHeight
+				}
+
+				reminder.Remind("Log entry is unavailable yet", fields)
+				ok = false
+				break
+			}
+
+			if finalityRequired <= FileFinalized && !*finalized {
+				reminder.Remind("Log entry is available, but not finalized yet", logrus.Fields{
+					"root": root,
+				})
+				ok = false
+				break
+			}
+		}
+
+		if ok {
+			return nil
+		}
+	}
 }
 
 func (uploader *Uploader) UploadFile(ctx context.Context, path string, option ...UploadOption) (txnHash common.Hash, rootHash common.Hash, err error) {
