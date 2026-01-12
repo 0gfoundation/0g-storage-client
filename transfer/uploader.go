@@ -355,6 +355,7 @@ func (uploader *Uploader) uploadSlowParallel(ctx context.Context, data core.Iter
 			if afterReceiptTimer != nil {
 				afterReceiptTimer.Stop()
 			}
+			logrus.Info("File finalized on storage node")
 			return txHash, nil
 		case err := <-receiptCh:
 			if err != nil {
