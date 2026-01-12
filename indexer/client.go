@@ -87,11 +87,13 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 		return nil, err
 	}
 
+	trustedIps := make([]string, 0, len(allNodes.Trusted))
 	trustedClients := make([]*node.ZgsClient, 0, len(allNodes.Trusted))
 	for _, shardedNode := range allNodes.Trusted {
 		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
 		if err == nil {
 			trustedClients = append(trustedClients, client)
+			trustedIps = append(trustedIps, shardedNode.URL)
 		}
 	}
 
@@ -106,7 +108,7 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 		}
 	}
 
-	logrus.Info("Selected Nodes...")
+	logrus.WithField("ips", trustedIps).Info("Selected Nodes...")
 
 	return &transfer.SelectedNodes{
 		Trusted:    trustedClients,

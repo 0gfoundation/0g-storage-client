@@ -467,6 +467,8 @@ func (uploader *Uploader) waitForLogEntryByRoot(ctx context.Context, root common
 			if finalityRequired <= FileFinalized && !*finalized {
 				reminder.Remind("Log entry is available, but not finalized yet", logrus.Fields{
 					"root": root,
+					"finalized":  *finalized,
+					"ip":        client.URL(),
 				})
 				ok = false
 				break
