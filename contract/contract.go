@@ -63,7 +63,8 @@ func (f *FlowContract) GetNonce(ctx context.Context) (*big.Int, error) {
 
 	addr := sm.List()[0].Address()
 
-	nonce, err := f.clientWithSigner.Eth.TransactionCount(addr, nil)
+	pending := types.BlockNumberOrHashWithNumber(types.PendingBlockNumber)
+	nonce, err := f.clientWithSigner.Eth.TransactionCount(addr, &pending)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +150,6 @@ func TransactWithGasAdjustment(
 		retryOpts.Timeout = time.Until(t)
 	}
 
-	logrus.WithField("timeout", retryOpts.Timeout).WithField("maxNonGasRetries", retryOpts.MaxNonGasRetries).Debug("Set retry options")
-
 	if opts.Nonce == nil {
 		// Get the current nonce if not set.
 		nonce, err := contract.GetNonce(opts.Context)
@@ -160,8 +159,6 @@ func TransactWithGasAdjustment(
 		// add one to the nonce
 		opts.Nonce = nonce
 	}
-
-	logrus.WithField("nonce", opts.Nonce).Info("Set nonce")
 
 	if opts.GasPrice == nil {
 		// Get the current gas price if not set.
@@ -173,7 +170,12 @@ func TransactWithGasAdjustment(
 		logrus.WithField("gasPrice", opts.GasPrice).Debug("Receive current gas price from chain node")
 	}
 
-	logrus.WithField("gasPrice", opts.GasPrice).Info("Set gas price")
+	logrus.WithFields(logrus.Fields{
+		"timeout":          retryOpts.Timeout,
+		"maxNonGasRetries": retryOpts.MaxNonGasRetries,
+		"nonce":            opts.Nonce,
+		"gasPrice":         opts.GasPrice,
+	}).Info("Set tx params")
 
 	receiptCh := make(chan *types.Receipt, 1)
 	errCh := make(chan error, 1)
@@ -281,6 +283,85 @@ func TransactWithGasAdjustment(
 		case err := <-failCh:
 			cancel()
 			return nil, err
+		}
+	}
+}
+
+func TransactWithGasAdjustmentNoReceipt(
+	contract *FlowContract,
+	method string,
+	opts *bind.TransactOpts,
+	retryOpts *TxRetryOption,
+	params ...any,
+) (*types.Transaction, error) {
+	// Set timeout and max non-gas retries from retryOpts if provided.
+	if retryOpts == nil {
+		retryOpts = &TxRetryOption{
+			MaxNonGasRetries: DefaultMaxNonGasRetries,
+		}
+	}
+
+	if retryOpts.MaxNonGasRetries == 0 {
+		retryOpts.MaxNonGasRetries = DefaultMaxNonGasRetries
+	}
+
+	if retryOpts.Step == 0 {
+		retryOpts.Step = DefaultStep
+	}
+
+	if t, ok := opts.Context.Deadline(); ok {
+		retryOpts.Timeout = time.Until(t)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"timeout":          retryOpts.Timeout,
+		"maxNonGasRetries": retryOpts.MaxNonGasRetries,
+		"nonce":            opts.Nonce,
+		"gasPrice":         opts.GasPrice,
+	}).Info("Set tx params")
+
+	nRetries := 0
+	for {
+		if retryOpts.Timeout > 0 && opts.Context != nil && opts.Context.Err() != nil {
+			return nil, errors.WithMessage(opts.Context.Err(), "transaction submission canceled")
+		}
+
+		tx, err := contract.FlowTransactor.contract.Transact(opts, method, params...)
+		if err == nil {
+			return tx, nil
+		}
+
+		errStr := strings.ToLower(err.Error())
+
+		if !IsRetriableSubmitLogEntryError(errStr) {
+			if strings.Contains(errStr, "invalid nonce") {
+				return nil, err
+			}
+			return nil, errors.WithMessage(err, "failed to send transaction")
+		}
+
+		// If the error is due to mempool full or timeout, retry with a higher gas price
+		if strings.Contains(errStr, "mempool") || strings.Contains(errStr, "timeout") {
+			if retryOpts.MaxGasPrice == nil {
+				return nil, errors.WithMessage(err, "mempool full and no max gas price is set, failed to send transaction")
+			} else if opts.GasPrice.Cmp(retryOpts.MaxGasPrice) >= 0 {
+				return nil, errors.WithMessage(err, "reached max gas price, failed to send transaction")
+			} else {
+				newGasPrice := new(big.Int).Mul(opts.GasPrice, big.NewInt(retryOpts.Step))
+				newGasPrice.Div(newGasPrice, big.NewInt(10))
+				if newGasPrice.Cmp(retryOpts.MaxGasPrice) > 0 {
+					opts.GasPrice = new(big.Int).Set(retryOpts.MaxGasPrice)
+				} else {
+					opts.GasPrice = newGasPrice
+				}
+				logrus.WithError(err).Infof("Increasing gas price to %v due to mempool/timeout error", opts.GasPrice)
+			}
+		} else {
+			nRetries++
+			if nRetries >= retryOpts.MaxNonGasRetries {
+				return nil, errors.WithMessage(err, "failed to send transaction")
+			}
+			logrus.WithError(err).Infof("Retrying with same gas price %v, attempt %d", opts.GasPrice, nRetries)
 		}
 	}
 }

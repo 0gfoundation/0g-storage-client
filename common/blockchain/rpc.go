@@ -68,11 +68,11 @@ func WaitForReceipt(ctx context.Context, client *web3go.Client, txHash common.Ha
 	if len(opts) > 0 {
 		opt = opts[0]
 	} else {
-		opt.Interval = time.Second * 3
+		opt.Interval = time.Second * 1
 	}
 
 	if opt.Interval == 0 {
-		opt.Interval = time.Second * 3
+		opt.Interval = time.Second * 1
 	}
 
 	reminder := util.NewReminder(opt.logger, time.Minute)

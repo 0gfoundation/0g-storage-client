@@ -86,27 +86,38 @@ func (nm *NodeManager) Trusted() ([]*shard.ShardedNode, error) {
 	clients := nm.TrustedClients()
 
 	var nodes []*shard.ShardedNode
+	results := make(chan *shard.ShardedNode, len(clients))
 
 	for _, v := range clients {
-		start := time.Now()
-		config, err := v.GetShardConfig(context.Background())
-		if err != nil {
-			logrus.Debugf("Failed to retrieve shard config from trusted storage node %v, error: %v", v.URL(), err)
-			continue
-		}
+		client := v
+		go func() {
+			start := time.Now()
+			config, err := client.GetShardConfig(context.Background())
+			if err != nil {
+				logrus.Debugf("Failed to retrieve shard config from trusted storage node %v, error: %v", client.URL(), err)
+				results <- nil
+				return
+			}
 
-		if !config.IsValid() {
-			logrus.Debugf("Invalid shard config retrieved from trusted storage node %v: %v", v.URL(), config)
-			continue
-		}
+			if !config.IsValid() {
+				logrus.Debugf("Invalid shard config retrieved from trusted storage node %v: %v", client.URL(), config)
+				results <- nil
+				return
+			}
 
-		nodes = append(nodes, &shard.ShardedNode{
-			URL:     v.URL(),
-			Config:  config,
-			Latency: time.Since(start).Milliseconds(),
-		})
+			results <- &shard.ShardedNode{
+				URL:     client.URL(),
+				Config:  config,
+				Latency: time.Since(start).Milliseconds(),
+			}
+		}()
 	}
 
+	for range clients {
+		if node := <-results; node != nil {
+			nodes = append(nodes, node)
+		}
+	}
 	return nodes, nil
 }
 

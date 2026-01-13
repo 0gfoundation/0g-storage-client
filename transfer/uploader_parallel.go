@@ -22,6 +22,7 @@ type segmentUploader struct {
 	data     core.IterableData
 	tree     *merkle.Tree
 	txSeq    uint64
+	useTxSeq bool
 	clients  []*node.ZgsClient
 	tasks    []*uploadTask
 	taskSize uint
@@ -93,12 +94,18 @@ func (uploader *segmentUploader) ParallelDo(ctx context.Context, routine int, ta
 		"from_seg_index": startSegIndex,
 		"to_seg_index":   segIndex,
 		"step":           uploadTask.numShard,
+		"useTxSeq":       uploader.useTxSeq,
 		"root":           core.SegmentRoot(segments[0].Data),
 		"to_node":        uploader.clients[uploadTask.clientIndex].URL(),
 	}).Debug("Segments uploading")
 
-	for i := 0; i < tooManyDataRetries; i++ {
-		_, err := uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeq(ctx, segments, uploader.txSeq)
+	for i := range tooManyDataRetries {
+		var err error
+		if uploader.useTxSeq {
+			_, err = uploader.clients[uploadTask.clientIndex].UploadSegmentsByTxSeq(ctx, segments, uploader.txSeq)
+		} else {
+			_, err = uploader.clients[uploadTask.clientIndex].UploadSegments(ctx, segments)
+		}
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"taskId":      task,
