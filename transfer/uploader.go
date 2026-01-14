@@ -27,7 +27,7 @@ import (
 const defaultTaskSize = uint(10)
 const defaultBatchSize = uint(10)
 const fastUploadMaxSize = int64(256 * 1024)
-const defaultLogEntryWaitTimeout = 10 * time.Minute
+const slowParallelMaxSize = int64(2 * 1024 * 1024)
 
 type FinalityRequirement uint
 
@@ -323,7 +323,7 @@ func (uploader *Uploader) uploadFast(ctx context.Context, data core.IterableData
 func (uploader *Uploader) uploadSlow(ctx context.Context, data core.IterableData, tree *merkle.Tree, info *node.FileInfo, opt UploadOption, stageTimer time.Time) (common.Hash, common.Hash, error) {
 	txHash := common.Hash{}
 	if !opt.SkipTx || info == nil {
-		if data.Size() <= fastUploadMaxSize && info == nil {
+		if data.Size() <= slowParallelMaxSize && info == nil {
 			uploader.logger.WithField("root", tree.Root()).Info("Upload/Transaction in parallel")
 			txHash, err := uploader.uploadSlowParallel(ctx, data, tree, opt)
 			if err != nil {
