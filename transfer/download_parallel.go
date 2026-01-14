@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/0gfoundation/0g-storage-client/common/parallel"
-	"github.com/0gfoundation/0g-storage-client/common/shard"
 	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer/download"
@@ -15,10 +14,9 @@ import (
 )
 
 type segmentDownloader struct {
-	clients      []*node.ZgsClient
-	shardConfigs []*shard.ShardConfig
-	file         *download.DownloadingFile
-	txSeq        uint64
+	clients []*node.ZgsClient
+	file    *download.DownloadingFile
+	txSeq   uint64
 
 	startSegmentIndex uint64
 	endSegmentIndex   uint64
@@ -36,17 +34,16 @@ type segmentDownloader struct {
 
 var _ parallel.Interface = (*segmentDownloader)(nil)
 
-func newSegmentDownloader(downloader *Downloader, info *node.FileInfo, shardConfigs []*shard.ShardConfig, file *download.DownloadingFile, withProof bool) (*segmentDownloader, error) {
+func newSegmentDownloader(downloader *Downloader, info *node.FileInfo, file *download.DownloadingFile, withProof bool) (*segmentDownloader, error) {
 	startSegmentIndex := info.Tx.StartEntryIndex / core.DefaultSegmentMaxChunks
 	endSegmentIndex := (info.Tx.StartEntryIndex + core.NumSplits(int64(info.Tx.Size), core.DefaultChunkSize) - 1) / core.DefaultSegmentMaxChunks
 
 	offset := file.Metadata().Offset / core.DefaultSegmentSize
 
 	return &segmentDownloader{
-		clients:      downloader.clients,
-		shardConfigs: shardConfigs,
-		file:         file,
-		txSeq:        info.Tx.Seq,
+		clients: downloader.clients,
+		file:    file,
+		txSeq:   info.Tx.Seq,
 
 		startSegmentIndex: startSegmentIndex,
 		endSegmentIndex:   endSegmentIndex,
@@ -89,9 +86,13 @@ func (downloader *segmentDownloader) ParallelDo(ctx context.Context, routine, ta
 		err     error
 	)
 
-	for i := 0; i < len(downloader.shardConfigs); i += 1 {
-		nodeIndex := (routine + i) % len(downloader.shardConfigs)
-		if (downloader.startSegmentIndex+segmentIndex)%downloader.shardConfigs[nodeIndex].NumShard != downloader.shardConfigs[nodeIndex].ShardId {
+	for i := 0; i < len(downloader.clients); i += 1 {
+		nodeIndex := (routine + i) % len(downloader.clients)
+		shardConfig := downloader.clients[nodeIndex].ShardConfig()
+		if shardConfig == nil {
+			return nil, errors.New("ShardConfig is required on ZgsClient")
+		}
+		if (downloader.startSegmentIndex+segmentIndex)%shardConfig.NumShard != shardConfig.ShardId {
 			continue
 		}
 		// try download from current node

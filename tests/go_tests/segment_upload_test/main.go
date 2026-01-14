@@ -107,7 +107,7 @@ func runTest() error {
 	}
 	// wait for log entry
 	var info *node.FileInfo
-	zgsClients := node.MustNewZgsClients(zgsNodeUrls)
+	zgsClients := node.MustNewZgsClients(zgsNodeUrls, nil)
 	for i := range zgsClients {
 		zgsClients[i].Close()
 	}

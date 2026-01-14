@@ -139,7 +139,7 @@ func kvWrite(*cobra.Command, []string) {
 		if len(kvWriteArgs.node) == 0 {
 			logrus.Fatal("At least one of --node and --indexer should not be empty")
 		}
-		trusted := node.MustNewZgsClients(kvWriteArgs.node, providerOption)
+		trusted := node.MustNewZgsClients(kvWriteArgs.node, nil, providerOption)
 		clients = &transfer.SelectedNodes{Trusted: trusted}
 		for _, client := range trusted {
 			defer client.Close()

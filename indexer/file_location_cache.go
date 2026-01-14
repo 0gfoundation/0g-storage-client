@@ -140,7 +140,7 @@ func (c *FileLocationCache) getFileLocation(ctx context.Context, txSeq uint64, c
 						continue
 					}
 				}
-				zgsClient, err := node.NewZgsClient(url, defaultZgsClientOpt)
+				zgsClient, err := node.NewZgsClient(url, nil, defaultZgsClientOpt)
 				if err != nil {
 					continue
 				}

@@ -107,15 +107,20 @@ func (uploader *segmentUploader) ParallelDo(ctx context.Context, routine int, ta
 			_, err = uploader.clients[uploadTask.clientIndex].UploadSegments(ctx, segments)
 		}
 		if err != nil {
-			logrus.WithFields(logrus.Fields{
+			fields := logrus.Fields{
 				"taskId":      task,
 				"segIndex":    segIndex,
 				"startSegIdx": startSegIndex,
 				"numSegments": numSegments,
-			}).Error("Failed to upload segments", err)
-
+				"node":        uploader.clients[uploadTask.clientIndex].URL(),
+			}
+			if isDuplicateError(err.Error()) {
+				uploader.logger.WithError(err).WithFields(fields).Info("Segments already uploaded or finalized on node")
+				break
+			}
+			uploader.logger.WithError(err).WithFields(fields).Error("Failed to upload segments")
 		}
-		if err == nil || isDuplicateError(err.Error()) {
+		if err == nil {
 			break
 		}
 
