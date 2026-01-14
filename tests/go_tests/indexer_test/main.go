@@ -67,7 +67,7 @@ func runTest() error {
 	if err != nil {
 		return errors.WithMessage(err, "failed to initialize data")
 	}
-	clients := node.MustNewZgsClients(zgsNodeUrls[1:])
+	clients := node.MustNewZgsClients(zgsNodeUrls[1:], nil)
 	for _, client := range clients {
 		defer client.Close()
 	}
@@ -88,7 +88,7 @@ func runTest() error {
 	}
 	root = tree.Root()
 
-	client0 := node.MustNewZgsClient(zgsNodeUrls[0])
+	client0 := node.MustNewZgsClient(zgsNodeUrls[0], nil)
 	for {
 		info, err := client0.GetFileInfo(ctx, root, true)
 		if err != nil {

@@ -12,11 +12,12 @@ import (
 // ZgsClient RPC Client connected to a 0g storage node's zgs RPC endpoint.
 type ZgsClient struct {
 	*rpcClient
+	shardConfig *shard.ShardConfig
 }
 
 // MustNewZgsClient Initalize a zgs client and panic on failure.
-func MustNewZgsClient(url string, option ...providers.Option) *ZgsClient {
-	client, err := NewZgsClient(url, option...)
+func MustNewZgsClient(url string, shardConfig *shard.ShardConfig, option ...providers.Option) *ZgsClient {
+	client, err := NewZgsClient(url, shardConfig, option...)
 	if err != nil {
 		logrus.WithError(err).WithField("url", url).Fatal("Failed to create zgs client")
 	}
@@ -25,21 +26,34 @@ func MustNewZgsClient(url string, option ...providers.Option) *ZgsClient {
 }
 
 // NewZgsClient Initalize a zgs client.
-func NewZgsClient(url string, option ...providers.Option) (*ZgsClient, error) {
+func NewZgsClient(url string, shardConfig *shard.ShardConfig, option ...providers.Option) (*ZgsClient, error) {
 	client, err := newRpcClient(url, option...)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ZgsClient{client}, nil
+	zgsClient := &ZgsClient{client, shardConfig}
+	if zgsClient.shardConfig == nil {
+		config, err := zgsClient.GetShardConfig(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		zgsClient.shardConfig = &config
+	}
+
+	return zgsClient, nil
 }
 
 // MustNewZgsClients Initialize a list of zgs clients and panic on failure.
-func MustNewZgsClients(urls []string, option ...providers.Option) []*ZgsClient {
+func MustNewZgsClients(urls []string, shardConfigs []*shard.ShardConfig, option ...providers.Option) []*ZgsClient {
 	var clients []*ZgsClient
 
-	for _, url := range urls {
-		client := MustNewZgsClient(url, option...)
+	for i, url := range urls {
+		var shardConfig *shard.ShardConfig
+		if i < len(shardConfigs) {
+			shardConfig = shardConfigs[i]
+		}
+		client := MustNewZgsClient(url, shardConfig, option...)
 		clients = append(clients, client)
 	}
 
@@ -49,6 +63,10 @@ func MustNewZgsClients(urls []string, option ...providers.Option) []*ZgsClient {
 // GetStatus Call zgs_getStatus RPC to get sync status of the node.
 func (c *ZgsClient) GetStatus(ctx context.Context) (Status, error) {
 	return providers.CallContext[Status](c, ctx, "zgs_getStatus")
+}
+
+func (c *ZgsClient) ShardConfig() *shard.ShardConfig {
+	return c.shardConfig
 }
 
 // CheckFileFinalized Call zgs_checkFileFinalized to check if specified file is finalized.

@@ -165,12 +165,7 @@ func (downloader *Downloader) downloadFile(ctx context.Context, filename string,
 
 	downloader.logger.WithField("num nodes", len(downloader.clients)).Info("Begin to download file from storage nodes")
 
-	shardConfigs, err := getShardConfigs(ctx, downloader.clients)
-	if err != nil {
-		return err
-	}
-
-	sd, err := newSegmentDownloader(downloader, info, shardConfigs, file, withProof)
+	sd, err := newSegmentDownloader(downloader, info, file, withProof)
 	if err != nil {
 		return errors.WithMessage(err, "Failed to create segment downloader")
 	}

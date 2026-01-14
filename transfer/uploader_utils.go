@@ -23,17 +23,17 @@ func isTooManyDataError(msg string) bool {
 	return strings.Contains(msg, tooManyDataError)
 }
 
-func getShardConfigs(ctx context.Context, clients []*node.ZgsClient) ([]*shard.ShardConfig, error) {
+func getShardConfigs(clients []*node.ZgsClient) ([]*shard.ShardConfig, error) {
 	shardConfigs := make([]*shard.ShardConfig, 0)
 	for _, client := range clients {
-		shardConfig, err := client.GetShardConfig(ctx)
-		if err != nil {
-			return nil, err
+		shardConfig := client.ShardConfig()
+		if shardConfig == nil {
+			return nil, errors.New("ShardConfig is required on ZgsClient")
 		}
 		if !shardConfig.IsValid() {
 			return nil, errors.New("NumShard is zero")
 		}
-		shardConfigs = append(shardConfigs, &shardConfig)
+		shardConfigs = append(shardConfigs, shardConfig)
 	}
 	return shardConfigs, nil
 }
@@ -41,9 +41,8 @@ func getShardConfigs(ctx context.Context, clients []*node.ZgsClient) ([]*shard.S
 func checkLogExistence(ctx context.Context, clients *SelectedNodes, root common.Hash) (*node.FileInfo, error) {
 	var info *node.FileInfo
 	var err error
-	allClients := append(clients.Trusted, clients.Discovered...)
 
-	for _, client := range allClients {
+	for _, client := range clients.Trusted {
 		info, err = client.GetFileInfo(ctx, root, true)
 		if err != nil {
 			return nil, err

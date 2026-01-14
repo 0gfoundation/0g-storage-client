@@ -81,10 +81,16 @@ func (uploader *FileSegmentUploader) Upload(ctx context.Context, fileSeg FileSeg
 func (uploader *FileSegmentUploader) newFileSegmentUploader(
 	ctx context.Context, fileSeg FileSegmentsWithProof, expectedReplica, taskSize uint, method string) (*fileSegmentUploader, error) {
 
-	//  get shard configurations
-	shardConfigs, err := getShardConfigs(ctx, uploader.clients)
-	if err != nil {
-		return nil, err
+	shardConfigs := make([]*shard.ShardConfig, 0, len(uploader.clients))
+	for _, client := range uploader.clients {
+		shardConfig := client.ShardConfig()
+		if shardConfig == nil {
+			return nil, errors.New("ShardConfig is required on ZgsClient")
+		}
+		if !shardConfig.IsValid() {
+			return nil, errors.New("NumShard is zero")
+		}
+		shardConfigs = append(shardConfigs, shardConfig)
 	}
 
 	// validate replica requirements

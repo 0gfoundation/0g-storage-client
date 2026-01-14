@@ -30,6 +30,6 @@ func init() {
 }
 
 func startGateway(*cobra.Command, []string) {
-	nodes := node.MustNewZgsClients(gatewayArgs.nodes)
+	nodes := node.MustNewZgsClients(gatewayArgs.nodes, nil)
 	gateway.MustServeLocal(nodes)
 }

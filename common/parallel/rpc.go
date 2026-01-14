@@ -46,7 +46,7 @@ func QueryZgsRpc[T any](ctx context.Context, nodes []string, rpcFunc func(*node.
 		option: opt,
 		nodes:  nodes,
 		clientFactory: func(url string) (*node.ZgsClient, error) {
-			return node.NewZgsClient(url, opt.Provider)
+			return node.NewZgsClient(url, nil, opt.Provider)
 		},
 		rpcFunc:        rpcFunc,
 		node2Results:   make(map[string]*RpcResult[T]),

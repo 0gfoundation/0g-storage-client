@@ -161,7 +161,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 				return txHash, nil, errors.New("log entry event count mismatch after mapping to data")
 			}
 
-			if _, err := uploader.waitForLogEntry(ctx, lastTreeToSubmit.Root(), TransactionPacked, rootSeqMap[lastTreeToSubmit.Root()]); err != nil {
+			if _, err := uploader.waitForLogEntry(ctx, lastTreeToSubmit.Root(), TransactionPacked, rootSeqMap[lastTreeToSubmit.Root()], true); err != nil {
 				return txHash, nil, errors.WithMessage(err, "Failed to check if log entry available on storage node")
 			}
 		}
@@ -188,7 +188,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 
 			if info == nil {
 				var err error
-				info, err = uploader.waitForLogEntry(ctx, trees[i].Root(), TransactionPacked, rootSeqMap[trees[i].Root()])
+				info, err = uploader.waitForLogEntry(ctx, trees[i].Root(), TransactionPacked, rootSeqMap[trees[i].Root()], true)
 				if err != nil {
 					errs <- errors.WithMessage(err, "Failed to get file info from storage node")
 					return
@@ -203,7 +203,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 
 			if !fastMode {
 				// Wait for transaction finality
-				if _, err := uploader.waitForLogEntry(ctx, trees[i].Root(), opts.DataOptions[i].FinalityRequired, info.Tx.Seq); err != nil {
+				if _, err := uploader.waitForLogEntry(ctx, trees[i].Root(), opts.DataOptions[i].FinalityRequired, info.Tx.Seq, true); err != nil {
 					errs <- errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
 					return
 				}

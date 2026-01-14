@@ -17,7 +17,7 @@ const BlockchainClientAddr = ""
 const PrivKey = ""
 
 func main() {
-	zgsClient, err := node.NewZgsClient(ZgsClientAddr)
+	zgsClient, err := node.NewZgsClient(ZgsClientAddr, nil)
 	if err != nil {
 		fmt.Println(err)
 		return

@@ -159,7 +159,7 @@ func (nm *NodeManager) AddTrustedNodes(nodes ...string) error {
 			logrus.WithError(err).WithField("ip", ip).Warn("Failed to query IP location")
 		}
 
-		client, err := node.NewZgsClient(v)
+		client, err := node.NewZgsClient(v, nil)
 		if err != nil {
 			return errors.WithMessagef(err, "Failed to create zgs client, url = %v", v)
 		}

@@ -246,7 +246,7 @@ func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3clie
 		return up, indexerClient.Close, nil
 	}
 
-	clients := node.MustNewZgsClients(args.node, providerOption)
+	clients := node.MustNewZgsClients(args.node, nil, providerOption)
 	closer := func() {
 		for _, client := range clients {
 			client.Close()

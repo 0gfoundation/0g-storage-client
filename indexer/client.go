@@ -90,7 +90,7 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 	trustedIps := make([]string, 0, len(allNodes.Trusted))
 	trustedClients := make([]*node.ZgsClient, 0, len(allNodes.Trusted))
 	for _, shardedNode := range allNodes.Trusted {
-		client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+		client, err := node.NewZgsClient(shardedNode.URL, &shardedNode.Config, c.option.ProviderOption)
 		if err == nil {
 			trustedClients = append(trustedClients, client)
 			trustedIps = append(trustedIps, shardedNode.URL)
@@ -101,7 +101,7 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 	if len(allNodes.Discovered) > 0 {
 		discoveredClients = make([]*node.ZgsClient, 0, len(allNodes.Discovered))
 		for _, shardedNode := range allNodes.Discovered {
-			client, err := node.NewZgsClient(shardedNode.URL, c.option.ProviderOption)
+			client, err := node.NewZgsClient(shardedNode.URL, &shardedNode.Config, c.option.ProviderOption)
 			if err == nil {
 				discoveredClients = append(discoveredClients, client)
 			}
@@ -250,7 +250,7 @@ func (c *Client) NewDownloaderFromIndexerNodes(ctx context.Context, root string)
 	}
 	clients := make([]*node.ZgsClient, 0)
 	for _, location := range locations {
-		client, err := node.NewZgsClient(location.URL, c.option.ProviderOption)
+		client, err := node.NewZgsClient(location.URL, &location.Config, c.option.ProviderOption)
 		if err != nil {
 			c.logger.Debugf("failed to initialize client of node %v, dropped.", location.URL)
 			continue
