@@ -38,24 +38,22 @@ type IndexerClientOption struct {
 	ProviderOption providers.Option
 	LogOption      common.LogOption // log option when uploading data
 	FullTrusted    bool             // whether to use full trusted nodes
+	Routines       int              // number of routines for uploader
+	Contract       *transfer.ContractAddress
 }
 
 // NewClient create new indexer client, url is indexer service url
-func NewClient(url string, option ...IndexerClientOption) (*Client, error) {
-	var opt IndexerClientOption
-	if len(option) > 0 {
-		opt = option[0]
-	}
+func NewClient(url string, option IndexerClientOption) (*Client, error) {
 
-	client, err := rpc.NewClient(url, opt.ProviderOption)
+	client, err := rpc.NewClient(url, option.ProviderOption)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Client{
 		Client: client,
-		option: opt,
-		logger: common.NewLogger(opt.LogOption),
+		option: option,
+		logger: common.NewLogger(option.LogOption),
 	}, nil
 }
 
@@ -116,41 +114,73 @@ func (c *Client) SelectNodes(ctx context.Context, expectedReplica uint, dropped 
 	}, nil
 }
 
-// NewUploaderFromIndexerNodes return an uploader with selected storage nodes from indexer service.
-func (c *Client) NewUploaderFromIndexerNodes(ctx context.Context, segNum uint64, w3Client *web3go.Client, expectedReplica uint, dropped []string, method string, fullTrusted bool) (*transfer.Uploader, error) {
-	return c.NewUploaderFromIndexerNodesWithContractConfig(ctx, segNum, w3Client, expectedReplica, dropped, method, fullTrusted, nil)
-}
-
 // NewUploaderFromIndexerNodesWithContractConfig returns an uploader with selected storage nodes and optional contract config.
-func (c *Client) NewUploaderFromIndexerNodesWithContractConfig(ctx context.Context, segNum uint64, w3Client *web3go.Client, expectedReplica uint, dropped []string, method string, fullTrusted bool, contractConfig *transfer.UploaderContractConfig) (*transfer.Uploader, error) {
+func (c *Client) NewUploaderFromIndexerNodes(ctx context.Context, segNum uint64, w3Client *web3go.Client, expectedReplica uint, dropped []string, method string, fullTrusted bool) (*transfer.Uploader, error) {
 	selected, err := c.SelectNodes(ctx, expectedReplica, dropped, method, fullTrusted)
 	if err != nil {
 		return nil, err
 	}
 
 	c.logger.Infof("get storage nodes from indexer (trusted: %v, discovered: %v)", len(selected.Trusted), len(selected.Discovered))
-	return transfer.NewUploaderWithContractConfig(ctx, w3Client, selected, contractConfig, c.option.LogOption)
+	uploader, err := transfer.NewUploaderWithContractConfig(ctx, w3Client, selected, transfer.UploaderConfig{
+		Routines:  c.option.Routines,
+		LogOption: c.option.LogOption,
+		Contact:   c.option.Contract,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return uploader, nil
 }
 
-// Upload submit data to 0g storage contract, then transfer the data to the storage nodes selected from indexer service.
-func (c *Client) Upload(ctx context.Context, w3Client *web3go.Client, data core.IterableData, option ...transfer.UploadOption) (eth_common.Hash, error) {
-	expectedReplica := uint(1)
+// SplitableUpload submits data and retries on node errors. If FullTrusted is false,
+// it tries once and falls back to full trusted nodes.
+func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, data core.IterableData, fragmentSize int64, option ...transfer.UploadOption) ([]eth_common.Hash, []eth_common.Hash, error) {
+	return c.splitableUpload(ctx, w3Client, data, fragmentSize, option...)
+}
+
+func (c *Client) splitableUpload(ctx context.Context, w3Client *web3go.Client, data core.IterableData, fragmentSize int64, option ...transfer.UploadOption) ([]eth_common.Hash, []eth_common.Hash, error) {
+	var opt transfer.UploadOption
 	if len(option) > 0 {
-		expectedReplica = max(expectedReplica, option[0].ExpectedReplica)
+		opt = option[0]
 	}
+	expectedReplica := max(uint(1), opt.ExpectedReplica)
+	maxRetry := opt.NRetries
+	if maxRetry <= 0 {
+		maxRetry = 3
+	}
+
 	dropped := make([]string, 0)
+	attempts := 0
+
 	for {
-		uploader, err := c.NewUploaderFromIndexerNodes(ctx, data.NumSegments(), w3Client, expectedReplica, dropped, option[0].Method, option[0].FullTrusted)
+		uploader, err := c.NewUploaderFromIndexerNodes(ctx, data.NumSegments(), w3Client, expectedReplica, dropped, opt.Method, opt.FullTrusted)
 		if err != nil {
-			return eth_common.Hash{}, err
+			return nil, nil, err
 		}
-		txHash, _, err := uploader.Upload(ctx, data, option...)
+
+		txHashes, roots, err := uploader.SplitableUpload(ctx, data, fragmentSize, opt)
+		if err == nil {
+			return txHashes, roots, nil
+		}
+
+		if !opt.FullTrusted {
+			opt.FullTrusted = true
+			c.logger.WithError(err).Warn("Upload failed, retrying with full trusted nodes")
+		} else {
+			attempts += 1
+		}
+
 		var rpcError *node.RPCError
 		if errors.As(err, &rpcError) {
 			dropped = append(dropped, rpcError.URL)
 			c.logger.Infof("dropped problematic node and retry: %v", rpcError.Error())
 		} else {
-			return txHash, err
+			c.logger.WithError(err).Warn("Upload failed, retrying")
+		}
+
+		if attempts >= maxRetry {
+			return txHashes, roots, err
 		}
 	}
 }

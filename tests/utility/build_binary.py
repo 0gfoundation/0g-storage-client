@@ -16,9 +16,6 @@ BSC_BINARY = "geth.exe" if is_windows_platform() else "geth"
 ZG_BINARY = "0gchaind.exe" if is_windows_platform() else "0gchaind"
 CLIENT_BINARY = "0g-storage-client.exe" if is_windows_platform() else "0g-storage-client"
 
-CLI_GIT_REV = "98d74b7e7e6084fc986cb43ce2c66692dac094a6"
-
-
 @unique
 class BuildBinaryResult(Enum):
     AlreadyExists = 0

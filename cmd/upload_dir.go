@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 
+	zg_common "github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/common/blockchain"
 	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -55,12 +56,20 @@ func uploadDir(*cobra.Command, []string) {
 		FullTrusted:      uploadDirArgs.fullTrusted,
 	}
 
-	uploader, closer, err := newUploader(ctx, 0, uploadDirArgs, w3client, opt)
+	uploader, closer, err := transfer.NewUploaderFromConfig(ctx, w3client, transfer.UploaderConfig{
+		Nodes:          uploadArgs.node,
+		ProviderOption: providerOption,
+		LogOption:      zg_common.LogOption{Logger: logrus.StandardLogger()},
+		Contact: &transfer.ContractAddress{
+			FlowAddress:   uploadArgs.flowAddress,
+			MarketAddress: uploadArgs.marketAddress,
+		},
+		Routines: uploadArgs.routines,
+	})
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to initialize uploader")
 	}
 	defer closer()
-	uploader.WithRoutines(uploadArgs.routines)
 
 	txnHash, rootHash, err := uploader.UploadDir(ctx, uploadDirArgs.file, opt)
 	if err != nil {

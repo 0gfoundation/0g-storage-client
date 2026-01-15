@@ -51,7 +51,9 @@ func (b *Batcher) Exec(ctx context.Context, option ...transfer.UploadOption) (co
 	}
 
 	// upload file
-	uploader, err := transfer.NewUploader(ctx, b.w3Client, b.clients, zg_common.LogOption{Logger: b.logger})
+	uploader, err := transfer.NewUploaderWithContractConfig(ctx, b.w3Client, b.clients, transfer.UploaderConfig{
+		LogOption: zg_common.LogOption{Logger: b.logger},
+	})
 	if err != nil {
 		return common.Hash{}, err
 	}
