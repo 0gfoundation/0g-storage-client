@@ -6,7 +6,7 @@ import sys
 
 from concurrent.futures import ProcessPoolExecutor
 
-from utility.build_binary import build_conflux, build_bsc, build_zg, build_cli
+from utility.build_binary import build_zg
 
 DEFAULT_PORT_MIN = 11000
 DEFAULT_PORT_MAX = 65535
