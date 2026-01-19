@@ -40,9 +40,6 @@ TEST_EXIT_FAILED = 1
 
 class TestFramework:
     def __init__(self, blockchain_node_type=BlockChainNodeType.ZG):
-        if "http_proxy" in os.environ:
-            del os.environ["http_proxy"]
-
         self.num_blockchain_nodes = 1
         self.num_nodes = 1
         self.blockchain_nodes = []

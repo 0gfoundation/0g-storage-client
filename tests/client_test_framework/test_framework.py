@@ -382,6 +382,7 @@ class ClientTestFramework(TestFramework):
         os.mkdir(data_dir)
         stdout = tempfile.NamedTemporaryFile(dir=data_dir, prefix="stdout", delete=False)
         stderr = tempfile.NamedTemporaryFile(dir=data_dir, prefix="stderr", delete=False)
+
         self.indexer_process = subprocess.Popen(
             indexer_args,
             stdout=stdout,

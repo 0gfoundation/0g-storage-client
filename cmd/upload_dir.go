@@ -57,14 +57,14 @@ func uploadDir(*cobra.Command, []string) {
 	}
 
 	uploader, closer, err := transfer.NewUploaderFromConfig(ctx, w3client, transfer.UploaderConfig{
-		Nodes:          uploadArgs.node,
+		Nodes:          uploadDirArgs.node,
 		ProviderOption: providerOption,
 		LogOption:      zg_common.LogOption{Logger: logrus.StandardLogger()},
 		Contact: &transfer.ContractAddress{
-			FlowAddress:   uploadArgs.flowAddress,
-			MarketAddress: uploadArgs.marketAddress,
+			FlowAddress:   uploadDirArgs.flowAddress,
+			MarketAddress: uploadDirArgs.marketAddress,
 		},
-		Routines: uploadArgs.routines,
+		Routines: uploadDirArgs.routines,
 	})
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to initialize uploader")

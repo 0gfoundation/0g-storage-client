@@ -37,14 +37,27 @@ def build_zg(dir: str) -> BuildBinaryResult:
 
 
 def build_cli(dir: str) -> BuildBinaryResult:
-    # Build 0g-storage-client binary if absent
-    return __build_from_github(
-        dir=dir,
-        binary_name=CLIENT_BINARY,
-        github_url="https://github.com/0gfoundation/0g-storage-client.git",
-        build_cmd="go build",
-        compiled_relative_path=[],
-    )
+    # Copy root 0g-storage-client binary into the temp folder if absent
+    if not os.path.exists(dir):
+        os.makedirs(dir, exist_ok=True)
+
+    binary_path = os.path.join(dir, CLIENT_BINARY)
+    if os.path.exists(binary_path):
+        return BuildBinaryResult.AlreadyExists
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    root_binary_path = os.path.join(repo_root, CLIENT_BINARY)
+    if not os.path.exists(root_binary_path):
+        print("Cannot find root binary: %s" % root_binary_path, flush=True)
+        return BuildBinaryResult.NotInstalled
+
+    shutil.copyfile(root_binary_path, binary_path)
+
+    if not is_windows_platform():
+        st = os.stat(binary_path)
+        os.chmod(binary_path, st.st_mode | stat.S_IEXEC)
+
+    return BuildBinaryResult.Installed
 
 
 def __asset_name(binary_name: str, zip: bool = False) -> str:

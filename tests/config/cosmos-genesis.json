@@ -1,7 +1,7 @@
 {
   "app_name": "0gchaind",
   "app_version": "v0.2.0-alpha.4-892-g6b920eb40",
-  "genesis_time": "2026-01-14T11:56:58.958023Z",
+  "genesis_time": "2026-01-19T11:43:46.734129Z",
   "chain_id": "0gchaind-local",
   "initial_height": 1,
   "app_hash": null,

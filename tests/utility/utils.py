@@ -1,5 +1,6 @@
 import base64
 import inspect
+import os
 import platform
 import rtoml
 import time
@@ -33,6 +34,10 @@ def blockchain_rpc_port(n):
 
 def blockchain_rpc_port_core(n):
     return PortMin.n + 4 * MAX_NODES + n
+
+
+def grpc_port(n):
+    return PortMin.n + 5 * MAX_NODES + n
 
 
 def arrange_port(category: int, node_index: int) -> int:
