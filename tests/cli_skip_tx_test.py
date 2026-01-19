@@ -24,7 +24,12 @@ class SkipTxTest(ClientTestFramework):
         data = random.randbytes(256 * 2048)
         file_to_upload.write(data)
         file_to_upload.close()
-        w3 = Web3(HTTPProvider(self.blockchain_nodes[0].rpc_url))
+        w3 = Web3(
+            HTTPProvider(
+                self.blockchain_nodes[0].rpc_url,
+                request_kwargs={"proxies": {"http": None, "https": None}},
+            )
+        )
 
         nonce = w3.eth.get_transaction_count(GENESIS_ACCOUNT.address)
         # first submission

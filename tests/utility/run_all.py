@@ -6,7 +6,7 @@ import sys
 
 from concurrent.futures import ProcessPoolExecutor
 
-from utility.build_binary import build_conflux, build_bsc, build_zg, build_cli
+from utility.build_binary import build_cli, build_zg
 
 DEFAULT_PORT_MIN = 11000
 DEFAULT_PORT_MAX = 65535
@@ -77,6 +77,7 @@ def run_all(
     slow_tests: set[str] = {},
     long_manual_tests: set[str] = {},
     single_run_tests: set[str] = {},
+    skip_tests: set[str] = {},
 ):
     tmp_dir = os.path.join(test_dir, "tmp")
     if not os.path.exists(tmp_dir):
@@ -86,7 +87,7 @@ def run_all(
     # build_conflux(tmp_dir)
     # build_bsc(tmp_dir)
     build_zg(tmp_dir)
-    # build_cli(tmp_dir)
+    build_cli(tmp_dir)
 
     start_time = time.time()
 
@@ -125,6 +126,7 @@ def run_all(
                     rel_path not in slow_tests
                     and rel_path not in long_manual_tests
                     and rel_path not in single_run_tests
+                    and rel_path not in skip_tests
                 ):
                     TEST_SCRIPTS.append(rel_path)
 

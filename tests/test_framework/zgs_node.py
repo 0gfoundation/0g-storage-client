@@ -6,6 +6,7 @@ from config.node_config import ZGS_CONFIG, update_config
 from test_framework.blockchain_node import NodeType, TestNode
 from utility.utils import (
     initialize_toml_config,
+    grpc_port,
     p2p_port,
     rpc_port,
     blockchain_rpc_port,
@@ -36,6 +37,7 @@ class ZgsNode(TestNode):
                     libp2p_nodes.append(f"/ip4/127.0.0.1/tcp/{p2p_port(i)}")
 
         rpc_listen_address = f"127.0.0.1:{rpc_port(index)}"
+        grpc_listen_address = f"127.0.0.1:{grpc_port(index)}"
 
         indexed_config = {
             "network_libp2p_port": p2p_port(index),
@@ -43,12 +45,16 @@ class ZgsNode(TestNode):
             "rpc": {
                 "listen_address": rpc_listen_address,
                 "listen_address_admin": rpc_listen_address,
+                "listen_address_grpc": grpc_listen_address,
             },
             "network_libp2p_nodes": libp2p_nodes,
             "log_contract_address": log_contract_address,
             "mine_contract_address": mine_contract_address,
             "reward_contract_address": reward_contract_address,
-            "blockchain_rpc_endpoint": f"http://127.0.0.1:{blockchain_rpc_port(0)}",
+            "blockchain_rpc_endpoint": os.environ.get(
+                "ZGS_BLOCKCHAIN_RPC_ENDPOINT",
+                f"http://127.0.0.1:{blockchain_rpc_port(0)}",
+            ),
         }
         # Set configs for this specific node.
         update_config(local_conf, indexed_config)

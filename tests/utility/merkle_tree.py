@@ -1,4 +1,4 @@
-import sha3
+from eth_utils import keccak
 
 from math import log2
 from utility.spec import ENTRY_SIZE
@@ -30,25 +30,19 @@ class Hasher:
             self.prefix00 = bytes()
             self.prefix01 = bytes()
 
-    def _hasher(self):
-        if self.algorithm == "keccak_256":
-            return sha3.keccak_256()
-        else:
-            raise NotImplementedError
-
     def hash_data(self, data):
         buff = self.prefix00 + (data if isinstance(data, bytes) else data.encode(self.encoding))
 
-        hasher = self._hasher()
-        hasher.update(buff)
-        return hasher.hexdigest().encode(self.encoding)
+        if self.algorithm != "keccak_256":
+            raise NotImplementedError
+        return keccak(buff).hex().encode(self.encoding)
 
     def hash_pair(self, left, right):
         buff = self.prefix01 + bytes.fromhex(left.decode("utf-8")) + bytes.fromhex(right.decode("utf-8"))
 
-        hasher = self._hasher()
-        hasher.update(buff)
-        return hasher.hexdigest().encode(self.encoding)
+        if self.algorithm != "keccak_256":
+            raise NotImplementedError
+        return keccak(buff).hex().encode(self.encoding)
 
 
 class Node:

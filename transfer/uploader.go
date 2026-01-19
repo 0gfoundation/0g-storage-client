@@ -17,6 +17,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	providers "github.com/openweb3/go-rpc-provider/provider_wrapper"
 	"github.com/openweb3/web3go"
 	"github.com/openweb3/web3go/types"
 	"github.com/pkg/errors"
@@ -40,12 +41,6 @@ const (
 type SelectedNodes struct {
 	Trusted    []*node.ZgsClient
 	Discovered []*node.ZgsClient
-}
-
-// UploaderContractConfig optionally pins contract addresses to avoid fetching them from storage nodes.
-type UploaderContractConfig struct {
-	FlowAddress   *common.Address
-	MarketAddress *common.Address
 }
 
 // UploadOption upload option for a file
@@ -75,6 +70,19 @@ type SubmitLogEntryOption struct {
 	WaitReceipt *bool
 }
 
+type ContractAddress struct {
+	FlowAddress   string
+	MarketAddress string
+}
+
+type UploaderConfig struct {
+	Nodes          []string
+	ProviderOption providers.Option
+	LogOption      zg_common.LogOption
+	Contact        *ContractAddress
+	Routines       int
+}
+
 // Uploader uploader to upload file to 0g storage, send on-chain transactions and transfer data to storage nodes.
 type Uploader struct {
 	flow     *contract.FlowContract // flow contract instance
@@ -94,73 +102,54 @@ func statusClient(clients *SelectedNodes) (*node.ZgsClient, error) {
 	return nil, errors.New("Storage node not specified")
 }
 
-// NewUploader Initialize a new uploader.
-func NewUploader(ctx context.Context, w3Client *web3go.Client, clients *SelectedNodes, opts ...zg_common.LogOption) (*Uploader, error) {
-	return NewUploaderWithContractConfig(ctx, w3Client, clients, nil, opts...)
+// for node lists
+func NewUploaderFromConfig(ctx context.Context, w3Client *web3go.Client, cfg UploaderConfig) (*Uploader, func(), error) {
+	clients := make([]*node.ZgsClient, 0, len(cfg.Nodes))
+	for _, url := range cfg.Nodes {
+		client, err := node.NewZgsClient(url, nil, cfg.ProviderOption)
+		if err != nil {
+			for _, c := range clients {
+				c.Close()
+			}
+			return nil, nil, err
+		}
+		clients = append(clients, client)
+	}
+	closer := func() {
+		for _, client := range clients {
+			client.Close()
+		}
+	}
+
+	uploader, err := NewUploaderWithContractConfig(ctx, w3Client, &SelectedNodes{Trusted: clients}, cfg)
+	if err != nil {
+		closer()
+		return nil, nil, err
+	}
+
+	return uploader, closer, nil
 }
 
 // NewUploaderWithContractConfig initializes a new uploader with optional contract addresses.
-func NewUploaderWithContractConfig(ctx context.Context, w3Client *web3go.Client, clients *SelectedNodes, contractConfig *UploaderContractConfig, opts ...zg_common.LogOption) (*Uploader, error) {
+func NewUploaderWithContractConfig(ctx context.Context, w3Client *web3go.Client, clients *SelectedNodes, cfg UploaderConfig) (*Uploader, error) {
 	if len(clients.Trusted) == 0 && len(clients.Discovered) == 0 {
 		return nil, errors.New("Storage node not specified")
 	}
 
-	var flowAddress common.Address
-	if contractConfig != nil && contractConfig.FlowAddress != nil {
-		flowAddress = *contractConfig.FlowAddress
-	} else {
-		statusNode, err := statusClient(clients)
-		if err != nil {
-			return nil, err
-		}
-		status, err := statusNode.GetStatus(context.Background())
-		if err != nil {
-			return nil, errors.WithMessagef(err, "Failed to get status from storage node %v", statusNode.URL())
-		}
-
-		chainId, err := w3Client.Eth.ChainId()
-		if err != nil {
-			return nil, errors.WithMessage(err, "Failed to get chain ID from blockchain node")
-		}
-
-		if chainId != nil && *chainId != status.NetworkIdentity.ChainId {
-			return nil, errors.Errorf("Chain ID mismatch, blockchain = %v, storage node = %v", *chainId, status.NetworkIdentity.ChainId)
-		}
-		flowAddress = status.NetworkIdentity.FlowContractAddress
-	}
-
-	flow, err := contract.NewFlowContract(flowAddress, w3Client)
+	market, flow, err := ResolveContractConfig(ctx, w3Client, clients, cfg.Contact)
 	if err != nil {
-		return nil, errors.WithMessage(err, "Failed to create flow contract")
-	}
-
-	var market *contract.Market
-	if contractConfig != nil && contractConfig.MarketAddress != nil {
-		backend, _ := w3Client.ToClientForContract()
-		market, err = contract.NewMarket(*contractConfig.MarketAddress, backend)
-		if err != nil {
-			return nil, errors.WithMessage(err, "Failed to create market contract")
-		}
-	} else {
-		market, err = flow.GetMarketContract(ctx)
-		if err != nil {
-			return nil, errors.WithMessagef(err, "Failed to get market contract from flow contract %v", flowAddress)
-		}
+		return nil, err
 	}
 
 	uploader := &Uploader{
-		clients: clients,
-		logger:  zg_common.NewLogger(opts...),
-		flow:    flow,
-		market:  market,
+		clients:  clients,
+		logger:   zg_common.NewLogger(cfg.LogOption),
+		flow:     flow,
+		market:   market,
+		routines: cfg.Routines,
 	}
 
 	return uploader, nil
-}
-
-func (uploader *Uploader) WithRoutines(routines int) *Uploader {
-	uploader.routines = routines
-	return uploader
 }
 
 // SplitableUpload submit data to 0g storage contract and large data will be splited to reduce padding cost.

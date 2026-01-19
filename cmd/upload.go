@@ -11,12 +11,9 @@ import (
 	"github.com/0gfoundation/0g-storage-client/common/blockchain"
 	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/indexer"
-	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/openweb3/web3go"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -170,30 +167,45 @@ func upload(*cobra.Command, []string) {
 	}
 	defer file.Close()
 
-	uploader, closer, err := newUploader(ctx, file.NumSegments(), uploadArgs, w3client, opt)
-	if err != nil {
-		logrus.WithError(err).Fatal("Failed to initialize uploader")
-	}
-	defer closer()
-	uploader.WithRoutines(uploadArgs.routines)
+	var roots []common.Hash
+	if uploadArgs.indexer != "" {
+		indexerClient, err := indexer.NewClient(uploadArgs.indexer, indexer.IndexerClientOption{
+			ProviderOption: providerOption,
+			LogOption:      zg_common.LogOption{Logger: logrus.StandardLogger()},
+			Routines:       uploadArgs.routines,
+			Contract: &transfer.ContractAddress{
+				FlowAddress:   uploadArgs.flowAddress,
+				MarketAddress: uploadArgs.marketAddress,
+			},
+		})
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize indexer client")
+		}
+		defer indexerClient.Close()
 
-	_, roots, err := uploader.SplitableUpload(ctx, file, uploadArgs.fragmentSize, opt)
-	if err != nil && opt.FullTrusted {
-		logrus.WithError(err).Fatal("Failed to upload file with full trusted nodes")
-	}
-
-	if err != nil && !opt.FullTrusted {
-		logrus.WithError(err).Warn("Upload with full trusted nodes failed, retrying with all full trusted nodes")
-		opt.FullTrusted = true
-		fullUploader, fullCloser, err := newUploader(ctx, file.NumSegments(), uploadArgs, w3client, opt)
+		_, roots, err = indexerClient.SplitableUpload(ctx, w3client, file, uploadArgs.fragmentSize, opt)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to upload file")
+		}
+	} else {
+		uploader, closer, err := transfer.NewUploaderFromConfig(ctx, w3client, transfer.UploaderConfig{
+			Nodes:          uploadArgs.node,
+			ProviderOption: providerOption,
+			LogOption:      zg_common.LogOption{Logger: logrus.StandardLogger()},
+			Contact: &transfer.ContractAddress{
+				FlowAddress:   uploadArgs.flowAddress,
+				MarketAddress: uploadArgs.marketAddress,
+			},
+			Routines: uploadArgs.routines,
+		})
 		if err != nil {
 			logrus.WithError(err).Fatal("Failed to initialize uploader")
 		}
-		defer fullCloser()
-		fullUploader.WithRoutines(uploadArgs.routines)
-		_, roots, err = fullUploader.SplitableUpload(ctx, file, uploadArgs.fragmentSize, opt)
+		defer closer()
+
+		_, roots, err = uploader.SplitableUpload(ctx, file, uploadArgs.fragmentSize, opt)
 		if err != nil {
-			logrus.WithError(err).Fatal("Failed to upload file with full trusted nodes")
+			logrus.WithError(err).Fatal("Failed to upload file")
 		}
 	}
 
@@ -206,58 +218,4 @@ func upload(*cobra.Command, []string) {
 		}
 		logrus.Infof("file uploaded in %v fragments, roots = %v", len(roots), strings.Join(s, ","))
 	}
-}
-
-func newUploader(ctx context.Context, segNum uint64, args uploadArgument, w3client *web3go.Client, opt transfer.UploadOption) (*transfer.Uploader, func(), error) {
-	var contractConfig *transfer.UploaderContractConfig
-	if args.flowAddress != "" {
-		if !common.IsHexAddress(args.flowAddress) {
-			return nil, nil, errors.Errorf("invalid flow address: %s", args.flowAddress)
-		}
-		flowAddr := common.HexToAddress(args.flowAddress)
-		contractConfig = &transfer.UploaderContractConfig{
-			FlowAddress: &flowAddr,
-		}
-		if args.marketAddress != "" {
-			if !common.IsHexAddress(args.marketAddress) {
-				return nil, nil, errors.Errorf("invalid market address: %s", args.marketAddress)
-			}
-			marketAddr := common.HexToAddress(args.marketAddress)
-			contractConfig.MarketAddress = &marketAddr
-		}
-	} else if args.marketAddress != "" {
-		return nil, nil, errors.New("market-address requires flow-address")
-	}
-
-	if args.indexer != "" {
-		indexerClient, err := indexer.NewClient(args.indexer, indexer.IndexerClientOption{
-			ProviderOption: providerOption,
-			LogOption:      zg_common.LogOption{Logger: logrus.StandardLogger()},
-		})
-		if err != nil {
-			return nil, nil, errors.WithMessage(err, "failed to initialize indexer client")
-		}
-
-		up, err := indexerClient.NewUploaderFromIndexerNodesWithContractConfig(ctx, segNum, w3client, opt.ExpectedReplica, nil, opt.Method, opt.FullTrusted, contractConfig)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		return up, indexerClient.Close, nil
-	}
-
-	clients := node.MustNewZgsClients(args.node, nil, providerOption)
-	closer := func() {
-		for _, client := range clients {
-			client.Close()
-		}
-	}
-
-	up, err := transfer.NewUploaderWithContractConfig(ctx, w3client, &transfer.SelectedNodes{Trusted: clients}, contractConfig, zg_common.LogOption{Logger: logrus.StandardLogger()})
-	if err != nil {
-		closer()
-		return nil, nil, err
-	}
-
-	return up, closer, nil
 }

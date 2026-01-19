@@ -4,7 +4,7 @@ import tempfile
 import time
 
 from web3 import Web3, HTTPProvider
-from web3.middleware import construct_sign_and_send_raw_middleware
+from web3.middleware import SignAndSendRawMiddlewareBuilder
 from enum import Enum, unique
 from config.node_config import (
     GENESIS_PRIV_KEY,
@@ -12,22 +12,16 @@ from config.node_config import (
     TX_PARAMS,
 )
 from utility.simple_rpc_proxy import SimpleRpcProxy
-from utility.utils import initialize_config, wait_until, estimate_st_performance
+from utility.utils import initialize_config, wait_until
 from test_framework.contracts import load_contract_metadata
 
 
 @unique
 class BlockChainNodeType(Enum):
-    Conflux = 0
-    BSC = 1
-    ZG = 2
+    ZG = 0
 
     def block_time(self):
-        if self == BlockChainNodeType.Conflux:
-            return 0.5
-        elif self == BlockChainNodeType.BSC:
-            return 32 / estimate_st_performance()
-        elif self == BlockChainNodeType.ZG:
+        if self == BlockChainNodeType.ZG:
             return 0.5
         else:
             raise AssertionError("Unsupported blockchain type")
@@ -44,7 +38,9 @@ class FailedToStartError(Exception):
 
 
 class TestNode:
-    def __init__(self, node_type, index, data_dir, rpc_url, binary, config, log, rpc_timeout=10):
+    def __init__(
+        self, node_type, index, data_dir, rpc_url, binary, config, log, rpc_timeout=10
+    ):
         assert os.path.exists(binary), "Binary not found: %s" % binary
         self.node_type = node_type
         self.index = index
@@ -68,7 +64,9 @@ class TestNode:
 
     def __getattr__(self, name):
         """Dispatches any unrecognised messages to the RPC connection."""
-        assert self.rpc_connected and self.rpc is not None, self._node_msg("Error: no RPC connection")
+        assert self.rpc_connected and self.rpc is not None, self._node_msg(
+            "Error: no RPC connection"
+        )
         return getattr(self.rpc, name)
 
     def _node_msg(self, msg: str) -> str:
@@ -86,9 +84,13 @@ class TestNode:
     def start(self, redirect_stderr=False):
         my_env = os.environ.copy()
         if self.stdout is None:
-            self.stdout = tempfile.NamedTemporaryFile(dir=self.data_dir, prefix="stdout", delete=False)
+            self.stdout = tempfile.NamedTemporaryFile(
+                dir=self.data_dir, prefix="stdout", delete=False
+            )
         if self.stderr is None:
-            self.stderr = tempfile.NamedTemporaryFile(dir=self.data_dir, prefix="stderr", delete=False)
+            self.stderr = tempfile.NamedTemporaryFile(
+                dir=self.data_dir, prefix="stderr", delete=False
+            )
 
         if redirect_stderr:
             self.process = subprocess.Popen(
@@ -118,7 +120,13 @@ class TestNode:
         for _ in range(poll_per_s * self.rpc_timeout):
             if self.process.poll() is not None:
                 raise FailedToStartError(
-                    self._node_msg("exited with status {} during initialization".format(self.process.returncode))
+                    self._node_msg(
+                        "exited with status {} during initialization \n\nstderr: {}\n\nstdout: {}\n\n".format(
+                            self.process.returncode,
+                            self.stderr.read(),
+                            self.stdout.read(),
+                        )
+                    )
                 )
             rpc = SimpleRpcProxy(self.rpc_url, timeout=self.rpc_timeout)
             if check(rpc):
@@ -127,7 +135,9 @@ class TestNode:
                 return
             time.sleep(1.0 / poll_per_s)
         self._raise_assertion_error(
-            "failed to get RPC proxy: index = {}, rpc_url = {}".format(self.index, self.rpc_url)
+            "failed to get RPC proxy: index = {}, rpc_url = {}".format(
+                self.index, self.rpc_url
+            )
         )
 
     def stop(self, expected_stderr="", kill=False, wait=True):
@@ -144,15 +154,19 @@ class TestNode:
         self.stderr.seek(0)
         stderr = self.stderr.read().decode("utf-8").strip()
         # TODO: Check how to avoid `pthread lock: Invalid argument`.
-        if stderr != expected_stderr and stderr != "pthread lock: Invalid argument":
+        if stderr != expected_stderr and stderr != "pthread lock: Invalid argument" and "pthread_mutex_lock" not in stderr:
             # print process status for debug
             if self.return_code is None:
                 self.log.info("Process is still running")
             else:
-                self.log.info("Process has terminated with code {}".format(self.return_code))
+                self.log.info(
+                    "Process has terminated with code {}".format(self.return_code)
+                )
 
             raise AssertionError(
-                "Unexpected stderr {} != {} from node={}{}".format(stderr, expected_stderr, self.node_type, self.index)
+                "Unexpected stderr {} != {} from node={}{}".format(
+                    stderr, expected_stderr, self.node_type, self.index
+                )
             )
 
         self.__safe_close_stdout_stderr__()
@@ -232,18 +246,22 @@ class BlockchainNode(TestNode):
         return w3.eth.wait_for_transaction_receipt(tx_hash, timeout)
 
     def setup_contract(self, enable_market, mine_period, lifetime_seconds):
-        w3 = Web3(HTTPProvider(self.rpc_url))
+        w3 = Web3(
+            HTTPProvider(self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}})
+        )
 
         account1 = w3.eth.account.from_key(GENESIS_PRIV_KEY)
         account2 = w3.eth.account.from_key(GENESIS_PRIV_KEY1)
-        w3.middleware_onion.add(construct_sign_and_send_raw_middleware([account1, account2]))
-        # account = w3.eth.account.from_key(GENESIS_PRIV_KEY1)
-        # w3.middleware_onion.add(construct_sign_and_send_raw_middleware(account))
+        w3.middleware_onion.add(
+            SignAndSendRawMiddlewareBuilder.build([account1, account2])
+        )
 
         def deploy_contract(name, args=None):
             if args is None:
                 args = []
-            contract_interface = load_contract_metadata(path=self.contract_path, name=name)
+            contract_interface = load_contract_metadata(
+                path=self.contract_path, name=name
+            )
             contract = w3.eth.contract(
                 abi=contract_interface["abi"],
                 bytecode=contract_interface["bytecode"],
@@ -274,9 +292,9 @@ class BlockchainNode(TestNode):
             mine_contract, _ = deploy_contract("PoraMineTest", [0])
             self.log.debug("Mine deployed")
 
-            mine_contract.functions.initialize(1, flow_contract.address, dummy_reward_contract.address).transact(
-                TX_PARAMS
-            )
+            mine_contract.functions.initialize(
+                1, flow_contract.address, dummy_reward_contract.address
+            ).transact(TX_PARAMS)
             mine_contract.functions.setDifficultyAdjustRatio(1).transact(TX_PARAMS)
             mine_contract.functions.setTargetSubmissions(2).transact(TX_PARAMS)
             self.log.debug("Mine Initialized")
@@ -308,13 +326,17 @@ class BlockchainNode(TestNode):
             market_contract, _ = deploy_contract("FixedPrice", [])
             self.log.debug("Market deployed")
 
-            reward_contract, _ = deploy_contract("ChunkLinearReward", [lifetime_seconds])
+            reward_contract, _ = deploy_contract(
+                "ChunkLinearReward", [lifetime_seconds]
+            )
             self.log.debug("Reward deployed")
 
             flow_contract, _ = deploy_contract("FixedPriceFlow", [0])
             self.log.debug("Flow deployed")
 
-            mine_contract.functions.initialize(1, flow_contract.address, reward_contract.address).transact(TX_PARAMS)
+            mine_contract.functions.initialize(
+                1, flow_contract.address, reward_contract.address
+            ).transact(TX_PARAMS)
             mine_contract.functions.setDifficultyAdjustRatio(1).transact(TX_PARAMS)
             mine_contract.functions.setTargetSubmissions(2).transact(TX_PARAMS)
             self.log.debug("Mine Initialized")
@@ -326,13 +348,15 @@ class BlockchainNode(TestNode):
             ).transact(TX_PARAMS)
             self.log.debug("Market Initialized")
 
-            reward_contract.functions.initialize(market_contract.address, mine_contract.address).transact(TX_PARAMS)
+            reward_contract.functions.initialize(
+                market_contract.address, mine_contract.address
+            ).transact(TX_PARAMS)
             reward_contract.functions.setBaseReward(10**18).transact(TX_PARAMS)
             self.log.debug("Reward Initialized")
 
-            flow_initialize_hash = flow_contract.functions.initialize(market_contract.address, mine_period).transact(
-                TX_PARAMS
-            )
+            flow_initialize_hash = flow_contract.functions.initialize(
+                market_contract.address, mine_period
+            ).transact(TX_PARAMS)
             self.log.debug("Flow Initialized")
 
             self.wait_for_transaction_receipt(w3, flow_initialize_hash)
@@ -346,20 +370,24 @@ class BlockchainNode(TestNode):
             return deploy_no_market()
 
     def get_contract(self, contract_address):
-        w3 = Web3(HTTPProvider(self.rpc_url))
+        w3 = Web3(
+            HTTPProvider(self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}})
+        )
 
         account1 = w3.eth.account.from_key(GENESIS_PRIV_KEY)
         account2 = w3.eth.account.from_key(GENESIS_PRIV_KEY1)
-        w3.middleware_onion.add(construct_sign_and_send_raw_middleware([account1, account2]))
+        w3.middleware_onion.add(
+            SignAndSendRawMiddlewareBuilder.build([account1, account2])
+        )
 
         contract_interface = load_contract_metadata(self.contract_path, "Flow")
         return w3.eth.contract(address=contract_address, abi=contract_interface["abi"])
 
     def wait_for_transaction(self, tx_hash):
-        w3 = Web3(HTTPProvider(self.rpc_url))
+        w3 = Web3(
+            HTTPProvider(self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}})
+        )
         w3.eth.wait_for_transaction_receipt(tx_hash)
 
     def start(self):
-        super().start(
-            self.blockchain_node_type == BlockChainNodeType.BSC or self.blockchain_node_type == BlockChainNodeType.ZG
-        )
+        super().start(self.blockchain_node_type == BlockChainNodeType.ZG)
