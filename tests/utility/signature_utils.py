@@ -1,9 +1,7 @@
 import coincurve
 import random
 import rlp
-import sha3 as _sha3
-
-from eth_utils import decode_hex, int_to_big_endian, big_endian_to_int
+from eth_utils import decode_hex, int_to_big_endian, big_endian_to_int, keccak
 from eth_utils import encode_hex as encode_hex_0x
 from py_ecc.secp256k1 import privtopub, ecdsa_raw_sign, ecdsa_raw_recover
 from rlp.sedes import big_endian_int, BigEndianInt, Binary
@@ -11,7 +9,7 @@ from rlp.utils import ALL_BYTES
 
 
 def sha3_256(x):
-    return _sha3.keccak_256(x).digest()
+    return keccak(x)
 
 
 class Memoize:

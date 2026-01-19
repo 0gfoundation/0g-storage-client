@@ -1,5 +1,4 @@
 from enum import Enum, unique
-import os
 
 from utility.utils import is_windows_platform
 from utility.build_binary import __asset_name, __build_from_github, __download_from_github

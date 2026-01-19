@@ -4,7 +4,7 @@ import os
 import platform
 import rtoml
 import time
-import sha3
+from eth_utils import keccak
 
 
 class PortMin:
@@ -130,9 +130,7 @@ def assert_greater_than_or_equal(thing1, thing2):
 
 # 14900K has the performance point 100
 def estimate_st_performance():
-    hasher = sha3.keccak_256()
     input = b"\xcc" * (1 << 26)
     start_time = time.perf_counter()
-    hasher.update(input)
-    digest = hasher.hexdigest()
+    digest = keccak(input).hex()
     return 10 / (time.perf_counter() - start_time)
