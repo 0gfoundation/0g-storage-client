@@ -12,8 +12,8 @@ BIN_DIR ?= $(ROOT_DIR)/bin
 DATA_DIR ?= $(ROOT_DIR)/data
 SRC_DIR ?= $(ROOT_DIR)/src
 TMP_DIR ?= $(ROOT_DIR)/tmp
-GETH_BIN := $(TMP_DIR)/0gchaind/geth
-CHAIND_BIN := $(TMP_DIR)/0gchaind/0gchaind
+GETH_BIN := $(TMP_DIR)/geth
+CHAIND_BIN := $(TMP_DIR)/0gchaind
 
 ETH_HTTP_PORT ?= 8545
 ETH_WS_PORT ?= 8546
