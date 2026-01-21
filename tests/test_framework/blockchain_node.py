@@ -246,10 +246,7 @@ class BlockchainNode(TestNode):
         return w3.eth.wait_for_transaction_receipt(tx_hash, timeout)
 
     def setup_contract(self, enable_market, mine_period, lifetime_seconds):
-        w3 = Web3(
-            HTTPProvider(self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}})
-        )
-
+        w3 = Web3(HTTPProvider(self.rpc_url))
         account1 = w3.eth.account.from_key(GENESIS_PRIV_KEY)
         account2 = w3.eth.account.from_key(GENESIS_PRIV_KEY1)
         w3.middleware_onion.add(
@@ -277,6 +274,15 @@ class BlockchainNode(TestNode):
             )
             return contract, tx_hash
 
+        mineinitparams = (
+            1,  # difficulty
+            mine_period,  # targetMineBlocks
+            2,  # targetSubmissions
+            4,  # maxShards
+            1,  # nSubtasks
+            1,  # subtaskInterval
+        )
+
         def deploy_no_market():
             self.log.debug("Start deploy contracts")
 
@@ -293,10 +299,8 @@ class BlockchainNode(TestNode):
             self.log.debug("Mine deployed")
 
             mine_contract.functions.initialize(
-                1, flow_contract.address, dummy_reward_contract.address
+                flow_contract.address, dummy_reward_contract.address, mineinitparams
             ).transact(TX_PARAMS)
-            mine_contract.functions.setDifficultyAdjustRatio(1).transact(TX_PARAMS)
-            mine_contract.functions.setTargetSubmissions(2).transact(TX_PARAMS)
             self.log.debug("Mine Initialized")
 
             flow_initialize_hash = flow_contract.functions.initialize(
@@ -335,10 +339,8 @@ class BlockchainNode(TestNode):
             self.log.debug("Flow deployed")
 
             mine_contract.functions.initialize(
-                1, flow_contract.address, reward_contract.address
+                flow_contract.address, reward_contract.address, mineinitparams
             ).transact(TX_PARAMS)
-            mine_contract.functions.setDifficultyAdjustRatio(1).transact(TX_PARAMS)
-            mine_contract.functions.setTargetSubmissions(2).transact(TX_PARAMS)
             self.log.debug("Mine Initialized")
 
             market_contract.functions.initialize(

@@ -14,6 +14,7 @@ import traceback
 from pathlib import Path
 
 from eth_utils import encode_hex
+from config.node_config import TX_PARAMS
 from test_framework.contract_proxy import (
     FlowContractProxy,
     MineContractProxy,
@@ -157,20 +158,6 @@ class TestFramework:
             node.wait_for_rpc_connection()
 
     def add_arguments(self, parser: argparse.ArgumentParser):
-        parser.add_argument(
-            "--conflux-binary",
-            dest="conflux",
-            default=self.__default_conflux_binary__,
-            type=str,
-        )
-
-        parser.add_argument(
-            "--bsc-binary",
-            dest="bsc",
-            default=self.__default_geth_binary__,
-            type=str,
-        )
-
         parser.add_argument(
             "--zg-binary",
             dest="zg",
@@ -337,7 +324,7 @@ class TestFramework:
         return root
 
     def __submit_file__(self, chunk_data: bytes) -> str:
-        submissions, data_root = create_submission(chunk_data)
+        submissions, data_root = create_submission(chunk_data, TX_PARAMS["from"])
         self.contract.submit(submissions)
         self.num_deployed_contracts += 1
         wait_until(lambda: self.contract.num_submissions() == self.num_deployed_contracts)
