@@ -43,12 +43,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 	if len(option) > 0 {
 		opts = option[0]
 	} else {
-		submitter, err := uploader.flow.GetSubmitterAddress()
-		if err != nil {
-			return common.Hash{}, nil, errors.WithMessage(err, "Failed to get submitter address from flow contract")
-		}
 		opts = BatchUploadOption{
-			Submitter: submitter,
 			Fee:         nil,
 			Nonce:       nil,
 			DataOptions: make([]UploadOption, n),
