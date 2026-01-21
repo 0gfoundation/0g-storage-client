@@ -216,6 +216,13 @@ func (uploader *Uploader) Upload(ctx context.Context, data core.IterableData, op
 	if len(option) > 0 {
 		opt = option[0]
 	}
+	if opt.Submitter == (common.Address{}) {
+		submitter, err := uploader.flow.GetSubmitterAddress()
+		if err != nil {
+			return common.Hash{}, common.Hash{}, errors.WithMessage(err, "Failed to get submitter address from flow contract")
+		}
+		opt.Submitter = submitter
+	}
 	fastMode := opt.FastMode && data.Size() <= fastUploadMaxSize
 	if opt.FastMode && !fastMode {
 		uploader.logger.WithField("size", data.Size()).Info("Fast mode disabled for data size over limit")
@@ -402,6 +409,7 @@ func (uploader *Uploader) submitLogEntryNoReceipt(ctx context.Context, data core
 	waitReceipt := false
 	receiptFlag := waitReceipt
 	submitOpts := SubmitLogEntryOption{
+		Submitter:   opt.Submitter,
 		Fee:         opt.Fee,
 		Nonce:       opt.Nonce,
 		MaxGasPrice: opt.MaxGasPrice,
@@ -420,6 +428,7 @@ func (uploader *Uploader) submitLogEntryAndWait(ctx context.Context, data core.I
 	waitReceipt := true
 	receiptFlag := waitReceipt
 	submitOpts := SubmitLogEntryOption{
+		Submitter:   opt.Submitter,
 		Fee:         opt.Fee,
 		Nonce:       opt.Nonce,
 		MaxGasPrice: opt.MaxGasPrice,
