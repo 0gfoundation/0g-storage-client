@@ -268,8 +268,6 @@ class TestFramework:
             "upload",
             "--url",
             blockchain_node_rpc_url,
-            "--contract",
-            contract_address,
             "--key",
             encode_hex(key),
             "--node",

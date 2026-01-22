@@ -274,7 +274,7 @@ class BlockchainNode(TestNode):
             )
             return contract, tx_hash
 
-        mineinitparams = (
+        mine_init_params = (
             1,  # difficulty
             mine_period,  # targetMineBlocks
             2,  # targetSubmissions
@@ -299,7 +299,7 @@ class BlockchainNode(TestNode):
             self.log.debug("Mine deployed")
 
             mine_contract.functions.initialize(
-                flow_contract.address, dummy_reward_contract.address, mineinitparams
+                flow_contract.address, dummy_reward_contract.address, mine_init_params
             ).transact(TX_PARAMS)
             self.log.debug("Mine Initialized")
 
@@ -339,7 +339,7 @@ class BlockchainNode(TestNode):
             self.log.debug("Flow deployed")
 
             mine_contract.functions.initialize(
-                flow_contract.address, reward_contract.address, mineinitparams
+                flow_contract.address, reward_contract.address, mine_init_params
             ).transact(TX_PARAMS)
             self.log.debug("Mine Initialized")
 
@@ -351,7 +351,7 @@ class BlockchainNode(TestNode):
             self.log.debug("Market Initialized")
 
             reward_contract.functions.initialize(
-                market_contract.address, mine_contract.address
+                market_contract.address, mine_contract.address, TX_PARAMS['from']
             ).transact(TX_PARAMS)
             reward_contract.functions.setBaseReward(10**18).transact(TX_PARAMS)
             self.log.debug("Reward Initialized")
