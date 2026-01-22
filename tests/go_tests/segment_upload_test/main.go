@@ -98,9 +98,15 @@ func runTest() error {
 	if err != nil {
 		return errors.WithMessage(err, "failed to initialize uploader")
 	}
+	sm, err := w3client.GetSignerManager()
+	if err != nil {
+		return errors.WithMessage(err, "failed to get signer manager")
+	}
+	submitter := sm.List()[0].Address()
 	_, _, err = uploader.SubmitLogEntry(ctx, []core.IterableData{data}, make([][]byte, 1), transfer.SubmitLogEntryOption{
-		NRetries: 5,
-		Step:     15,
+		Submitter: submitter,
+		NRetries:  5,
+		Step:      15,
 	})
 	if err != nil {
 		return errors.WithMessage(err, "failed to submit log entry")

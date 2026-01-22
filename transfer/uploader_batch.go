@@ -17,6 +17,7 @@ import (
 
 // BatchUploadOption upload option for a batching
 type BatchUploadOption struct {
+	Submitter   common.Address // address of the transaction sender
 	Fee         *big.Int       // fee in neuron
 	Nonce       *big.Int       // nonce for transaction
 	MaxGasPrice *big.Int       // max gas price for transaction
@@ -49,6 +50,13 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 			Method:      "min",
 			FullTrusted: true,
 		}
+	}
+	if opts.Submitter == (common.Address{}) {
+		submitter, err := uploader.flow.GetSubmitterAddress()
+		if err != nil {
+			return common.Hash{}, nil, errors.WithMessage(err, "Failed to get submitter address from flow contract")
+		}
+		opts.Submitter = submitter
 	}
 	opts.TaskSize = max(opts.TaskSize, 1)
 	if len(opts.DataOptions) != n {
@@ -127,6 +135,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 		waitReceipt := !opts.FastMode
 		receiptFlag := waitReceipt
 		submitOpt := SubmitLogEntryOption{
+			Submitter:   opts.Submitter,
 			Fee:         opts.Fee,
 			Nonce:       opts.Nonce,
 			MaxGasPrice: opts.MaxGasPrice,

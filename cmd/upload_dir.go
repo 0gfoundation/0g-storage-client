@@ -6,6 +6,7 @@ import (
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/common/blockchain"
 	"github.com/0gfoundation/0g-storage-client/transfer"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -42,11 +43,27 @@ func uploadDir(*cobra.Command, []string) {
 	w3client := blockchain.MustNewWeb3(uploadDirArgs.url, uploadDirArgs.key, providerOption)
 	defer w3client.Close()
 
+	// Extract submitter address once from w3client, or use provided submitter if specified
+	var submitter common.Address
+	if uploadDirArgs.submitter != "" {
+		submitter = common.HexToAddress(uploadDirArgs.submitter)
+		if submitter == (common.Address{}) {
+			logrus.Fatal("Invalid submitter address provided")
+		}
+	} else {
+		sm, err := w3client.GetSignerManager()
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to get signer manager")
+		}
+		submitter = sm.List()[0].Address()
+	}
+
 	finalityRequired := transfer.TransactionPacked
 	if uploadDirArgs.finalityRequired {
 		finalityRequired = transfer.FileFinalized
 	}
 	opt := transfer.UploadOption{
+		Submitter:        submitter,
 		Tags:             hexutil.MustDecode(uploadDirArgs.tags),
 		FinalityRequired: finalityRequired,
 		TaskSize:         uploadDirArgs.taskSize,

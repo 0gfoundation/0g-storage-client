@@ -55,6 +55,14 @@ func NewFlowContract(flowAddress common.Address, clientWithSigner *web3go.Client
 	return &FlowContract{contract, flow, clientWithSigner}, nil
 }
 
+func (f *FlowContract) GetSubmitterAddress() (common.Address, error) {
+	sm, err := f.clientWithSigner.GetSignerManager()
+	if err != nil {
+		return common.Address{}, err
+	}
+	return sm.List()[0].Address(), nil
+}
+
 func (f *FlowContract) GetNonce(ctx context.Context) (*big.Int, error) {
 	sm, err := f.clientWithSigner.GetSignerManager()
 	if err != nil {
@@ -99,15 +107,15 @@ func (f *FlowContract) GetMarketContract(ctx context.Context) (*Market, error) {
 
 func (submission Submission) String() string {
 	var heights []uint64
-	for _, v := range submission.Nodes {
+	for _, v := range submission.Data.Nodes {
 		heights = append(heights, v.Height.Uint64())
 	}
 
-	return fmt.Sprintf("{ Size: %v, Heights: %v }", submission.Length, heights)
+	return fmt.Sprintf("{ Size: %v, Heights: %v }", submission.Data.Length, heights)
 }
 
 func (submission Submission) Root() common.Hash {
-	numNodes := len(submission.Nodes)
+	numNodes := len(submission.Data.Nodes)
 
 	// should be never occur
 	if numNodes == 0 {
@@ -115,9 +123,9 @@ func (submission Submission) Root() common.Hash {
 	}
 
 	// calculate root in reverse order
-	root := submission.Nodes[numNodes-1].Root
+	root := submission.Data.Nodes[numNodes-1].Root
 	for i := 1; i < numNodes; i++ {
-		left := submission.Nodes[numNodes-1-i]
+		left := submission.Data.Nodes[numNodes-1-i]
 		root = crypto.Keccak256Hash(left.Root[:], root[:])
 	}
 
@@ -368,7 +376,7 @@ func TransactWithGasAdjustmentNoReceipt(
 
 func (submission Submission) Fee(pricePerSector *big.Int) *big.Int {
 	var sectors int64
-	for _, node := range submission.Nodes {
+	for _, node := range submission.Data.Nodes {
 		sectors += 1 << node.Height.Int64()
 	}
 

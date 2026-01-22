@@ -9,6 +9,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/common/parallel"
 	"github.com/0gfoundation/0g-storage-client/contract"
 	"github.com/0gfoundation/0g-storage-client/core/merkle"
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,11 +24,15 @@ func NewFlow(data IterableData, tags []byte, opts ...common.LogOption) *Flow {
 	return &Flow{data: data, tags: tags, logger: common.NewLogger(opts...)}
 }
 
-func (flow *Flow) CreateSubmission() (*contract.Submission, error) {
+func (flow *Flow) CreateSubmission(submitter ethcommon.Address) (*contract.Submission, error) {
 	// TODO(kevin): limit file size, e.g., 2^31
 	submission := contract.Submission{
-		Length: big.NewInt(flow.data.Size()),
-		Tags:   flow.tags,
+		Data: contract.SubmissionData{
+			Length: big.NewInt(flow.data.Size()),
+			Tags:   flow.tags,
+			Nodes:  make([]contract.SubmissionNode, 0),
+		},
+		Submitter: submitter,
 	}
 
 	var offset int64
@@ -36,7 +41,7 @@ func (flow *Flow) CreateSubmission() (*contract.Submission, error) {
 		if err != nil {
 			return nil, err
 		}
-		submission.Nodes = append(submission.Nodes, *node)
+		submission.Data.Nodes = append(submission.Data.Nodes, *node)
 		offset += chunks * DefaultChunkSize
 	}
 
