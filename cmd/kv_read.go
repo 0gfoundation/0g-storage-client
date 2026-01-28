@@ -68,7 +68,6 @@ func kvRead(*cobra.Command, []string) {
 		if err != nil {
 			logrus.WithError(err).Fatalf("failed to read key %v", key)
 		}
-		logrus.Infof("key: %v, val: %v", key, val.Data)
 		m[key] = string(val.Data)
 	}
 	bs, _ := json.Marshal(m)

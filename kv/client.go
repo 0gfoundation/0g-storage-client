@@ -6,7 +6,6 @@ import (
 
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/sirupsen/logrus"
 )
 
 // Client client to query data from 0g kv node.
@@ -51,14 +50,6 @@ func (c *Client) GetValue(ctx context.Context, streamId common.Hash, key []byte,
 	for {
 		var seg *node.Value
 		seg, err = c.node.GetValue(ctx, streamId, key, uint64(len(val.Data)), maxQuerySize, val.Version)
-		logrus.WithFields(logrus.Fields{
-			"streamId":  streamId,
-			"key":       string(key),
-			"startIndex": uint64(len(val.Data)),
-			"length":    maxQuerySize,
-			"version":   val.Version,
-			"seg":       seg,
-		}).Info("Queried kv segment")
 		
 		if err != nil {
 			return

@@ -156,10 +156,6 @@ func kvWrite(*cobra.Command, []string) {
 	streamId := common.HexToHash(kvWriteArgs.streamId)
 
 	for i := range kvWriteArgs.keys {
-		logrus.WithFields(logrus.Fields{
-			"key": kvWriteArgs.keys[i],
-			"val": kvWriteArgs.values[i],
-		}).Info("Adding to kv batch")
 		batcher.Set(streamId,
 			[]byte(kvWriteArgs.keys[i]),
 			[]byte(kvWriteArgs.values[i]),

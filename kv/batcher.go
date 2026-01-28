@@ -37,7 +37,6 @@ func NewBatcher(version uint64, clients *transfer.SelectedNodes, w3Client *web3g
 func (b *Batcher) Exec(ctx context.Context, option ...transfer.UploadOption) (common.Hash, error) {
 	// build stream data
 	streamData, err := b.Build()
-	logrus.WithField("streamData", streamData).Info("Built stream data from batcher")
 	if err != nil {
 		return common.Hash{}, errors.WithMessage(err, "Failed to build stream data")
 	}
