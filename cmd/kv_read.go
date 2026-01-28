@@ -64,10 +64,11 @@ func kvRead(*cobra.Command, []string) {
 
 	m := make(map[string]string)
 	for _, key := range kvReadArgs.keys {
-		val, err := kvClient.GetValue(ctx, streamId, []byte(key))
+		val, err := kvClient.GetValue(ctx, streamId, []byte(key), kvReadArgs.version)
 		if err != nil {
 			logrus.WithError(err).Fatalf("failed to read key %v", key)
 		}
+		logrus.Infof("key: %v, val: %v", key, val.Data)
 		m[key] = string(val.Data)
 	}
 	bs, _ := json.Marshal(m)

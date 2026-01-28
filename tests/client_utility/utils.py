@@ -1,9 +1,3 @@
-from utility.utils import PortMin, MAX_NODES
+from utility.utils import PortCategory, arrange_port
 
-
-def kv_rpc_port(n):
-    return PortMin.n + 5 * MAX_NODES + n
-
-
-def indexer_port(n):
-    return PortMin.n + 6 * MAX_NODES + n
+__all__ = ["PortCategory", "arrange_port"]

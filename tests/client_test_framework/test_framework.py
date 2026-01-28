@@ -13,14 +13,21 @@ import time
 import traceback
 import json
 import requests
+import socket
 from pathlib import Path
 
 from eth_utils import encode_hex
 from test_framework.test_framework import TestFramework
 from test_framework.blockchain_node import BlockChainNodeType
 from client_test_framework.kv_node import KVNode
-from utility.utils import PortMin, is_windows_platform, wait_until
-from client_utility.utils import indexer_port
+from utility.utils import (
+    PortMin,
+    MAX_NODES,
+    PortCategory,
+    arrange_port,
+    is_windows_platform,
+    wait_until,
+)
 from client_utility.build_binary import build_kv
 
 
@@ -43,6 +50,7 @@ class ClientTestFramework(TestFramework):
 
         self.indexer_process = None
         self.indexer_rpc_url = None
+        self._kv_reserved_ports = set()
 
         # Set default binary path
         binary_ext = ".exe" if is_windows_platform() else ""
@@ -339,16 +347,39 @@ class ClientTestFramework(TestFramework):
             lines,
         )
 
-        return json.loads(lines[0].decode("utf-8").strip())
+        decoded_lines = [line.decode("utf-8", errors="replace").strip() for line in lines]
+        non_empty = [line for line in decoded_lines if line]
+        if not non_empty:
+            raise AssertionError(
+                "kv-read produced no output; full output: %s" % decoded_lines
+            )
+        # kv-read may print logs before the JSON payload; pick the last non-empty line.
+        try:
+            return json.loads(non_empty[-1])
+        except json.JSONDecodeError as ex:
+            raise AssertionError(
+                "kv-read output was not valid JSON. Last line: %s. Full output: %s"
+                % (non_empty[-1], non_empty)
+            ) from ex
 
     def setup_kv_node(self, index, stream_ids, updated_config={}):
-        build_kv(Path(self.kv_binary).parent.absolute())
+        local_config = dict(updated_config)
+        if "rpc_listen_address" not in local_config:
+            preferred_port = arrange_port(PortCategory.ZGS_KV_RPC, index)
+            selected_port = self._reserve_kv_rpc_port(preferred_port)
+            if selected_port != preferred_port:
+                self.log.warning(
+                    "KV RPC port %d is busy; using %d instead",
+                    preferred_port,
+                    selected_port,
+                )
+            local_config["rpc_listen_address"] = f"127.0.0.1:{selected_port}"
         assert os.path.exists(self.kv_binary), "%s should be exist" % self.kv_binary
         node = KVNode(
             index,
             self.root_dir,
             self.kv_binary,
-            updated_config,
+            local_config,
             self.contract.address(),
             self.log,
             stream_ids=stream_ids,
@@ -360,12 +391,35 @@ class ClientTestFramework(TestFramework):
         time.sleep(1)
         node.wait_for_rpc_connection()
 
+    def _reserve_kv_rpc_port(self, preferred_port):
+        if preferred_port not in self._kv_reserved_ports and self._is_port_free(preferred_port):
+            self._kv_reserved_ports.add(preferred_port)
+            return preferred_port
+        for offset in range(1, MAX_NODES):
+            candidate = preferred_port + offset
+            if candidate in self._kv_reserved_ports:
+                continue
+            if self._is_port_free(candidate):
+                self._kv_reserved_ports.add(candidate)
+                return candidate
+        raise AssertionError("No free KV RPC ports available starting at %d" % preferred_port)
+
+    @staticmethod
+    def _is_port_free(port, host="127.0.0.1"):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind((host, port))
+            except OSError:
+                return False
+        return True
+
     def setup_indexer(self, trusted, discover_node, discover_ports=None):
         indexer_args = [
             self.cli_binary,
             "indexer",
             "--endpoint",
-            ":{}".format(indexer_port(0)),
+            ":{}".format(arrange_port(PortCategory.ZGS_INDEXER_RPC, 0)),
             "--trusted",
             trusted,
             "--log-level",
@@ -390,7 +444,9 @@ class ClientTestFramework(TestFramework):
             cwd=data_dir,
             env=os.environ.copy(),
         )
-        self.indexer_rpc_url = "http://127.0.0.1:{}".format(indexer_port(0))
+        self.indexer_rpc_url = "http://127.0.0.1:{}".format(
+            arrange_port(PortCategory.ZGS_INDEXER_RPC, 0)
+        )
 
         def is_port_available(url):
             try:

@@ -274,6 +274,7 @@ func (c *Client) NewDownloaderFromIndexerNodes(ctx context.Context, root string)
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed to get file locations")
 	}
+	clientUrls := make([]string, 0, len(locations))
 	clients := make([]*node.ZgsClient, 0)
 	for _, location := range locations {
 		client, err := node.NewZgsClient(location.URL, &location.Config, c.option.ProviderOption)
@@ -287,10 +288,13 @@ func (c *Client) NewDownloaderFromIndexerNodes(ctx context.Context, root string)
 			continue
 		}
 		clients = append(clients, client)
+		clientUrls = append(clientUrls, location.URL)
 	}
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("no node holding the file found, FindFile triggered, try again later")
 	}
+
+	c.logger.Infof("get storage nodes from indexer: %v", clientUrls)
 	downloader, err := transfer.NewDownloader(clients, c.option.LogOption)
 	if err != nil {
 		return nil, err

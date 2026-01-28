@@ -4,6 +4,7 @@ import os
 import platform
 import rtoml
 import time
+from enum import IntEnum
 from eth_utils import keccak
 
 
@@ -15,33 +16,32 @@ class PortMin:
 MAX_NODES = 100
 
 
-def p2p_port(n):
-    assert n <= MAX_NODES
-    return PortMin.n + n
+class PortCategory(IntEnum):
+    ZGS_P2P = 0
+    ZG_ETH_WS = 1
+    ZG_ETH_METRICS = 2
+    ZG_AUTHRPC = 3
+    ZG_NODE_API = 4
+    ZG_P2P = 5
+    ZG_DISCOVERY = 6
+    ZG_CONSENSUS_P2P = 7
+    ZGS_RPC = 8
+    ZGS_GRPC = 9
+    ZG_ETH_HTTP = 10
+    ZG_CONSENSUS_RPC = 11
+    ZG_BLOCKCHAIN_P2P = 12
+    ZG_BLOCKCHAIN_WS = 13
+    ZG_TENDERMINT_RPC = 14
+    ZG_PPROF = 15
+    ZGS_KV_RPC = 16
+    ZGS_INDEXER_RPC = 17
 
 
-def rpc_port(n):
-    return PortMin.n + MAX_NODES + n
+PORT_RANGE = (max(PortCategory) + 1) * MAX_NODES
 
-
-def blockchain_p2p_port(n):
-    return PortMin.n + 2 * MAX_NODES + n
-
-
-def blockchain_rpc_port(n):
-    return PortMin.n + 3 * MAX_NODES + n
-
-
-def blockchain_rpc_port_core(n):
-    return PortMin.n + 4 * MAX_NODES + n
-
-
-def grpc_port(n):
-    return PortMin.n + 5 * MAX_NODES + n
-
-
-def arrange_port(category: int, node_index: int) -> int:
-    return PortMin.n + (100 + category) * MAX_NODES + node_index
+def arrange_port(category: PortCategory, node_index: int) -> int:
+    assert node_index <= MAX_NODES
+    return PortMin.n + int(category) * MAX_NODES + node_index
 
 
 def wait_until(predicate, *, attempts=float("inf"), timeout=float("inf"), lock=None):

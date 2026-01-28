@@ -12,11 +12,11 @@ if __name__ == "__main__":
     if not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir, exist_ok=True)
     build_zgs(tmp_dir)
-    # build_kv(tmp_dir)
+    build_kv(tmp_dir)
 
     run_all(
         test_dir=os.path.dirname(__file__),
         slow_tests={},
         long_manual_tests={},
-        skip_tests={"cli_kv_test.py"}
+        skip_tests={}
     )

@@ -135,7 +135,7 @@ func kvWrite(*cobra.Command, []string) {
 			logrus.WithError(err).Fatal("failed to select nodes from indexer")
 		}
 	}
-	if len(clients.Trusted) == 0 && len(clients.Discovered) == 0 {
+	if clients == nil || (len(clients.Trusted) == 0 && len(clients.Discovered) == 0) {
 		if len(kvWriteArgs.node) == 0 {
 			logrus.Fatal("At least one of --node and --indexer should not be empty")
 		}
@@ -156,6 +156,10 @@ func kvWrite(*cobra.Command, []string) {
 	streamId := common.HexToHash(kvWriteArgs.streamId)
 
 	for i := range kvWriteArgs.keys {
+		logrus.WithFields(logrus.Fields{
+			"key": kvWriteArgs.keys[i],
+			"val": kvWriteArgs.values[i],
+		}).Info("Adding to kv batch")
 		batcher.Set(streamId,
 			[]byte(kvWriteArgs.keys[i]),
 			[]byte(kvWriteArgs.values[i]),
