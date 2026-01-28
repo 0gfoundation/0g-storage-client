@@ -147,6 +147,9 @@ func kvWrite(*cobra.Command, []string) {
 	}
 
 	batcher := kv.NewBatcher(kvWriteArgs.version, clients, w3client, zg_common.LogOption{Logger: logrus.StandardLogger()})
+	if len(kvWriteArgs.values) == 0 && len(kvWriteArgs.keys) > 0 {
+		kvWriteArgs.values = make([]string, len(kvWriteArgs.keys))
+	}
 	if len(kvWriteArgs.keys) != len(kvWriteArgs.values) {
 		logrus.Fatal("keys and values length mismatch")
 	}
