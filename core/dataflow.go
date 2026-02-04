@@ -70,7 +70,15 @@ func SegmentRoot(chunks []byte, emptyChunksPadded ...uint64) common.Hash {
 
 	// append chunks
 	for offset, dataLen := 0, len(chunks); offset < dataLen; offset += DefaultChunkSize {
-		chunk := chunks[offset : offset+DefaultChunkSize]
+		end := offset + DefaultChunkSize
+		if end <= dataLen {
+			builder.Append(chunks[offset:end])
+			continue
+		}
+
+		// Last partial chunk: zero-pad to full chunk size.
+		chunk := make([]byte, DefaultChunkSize)
+		copy(chunk, chunks[offset:])
 		builder.Append(chunk)
 	}
 

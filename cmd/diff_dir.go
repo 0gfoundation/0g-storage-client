@@ -3,6 +3,9 @@ package cmd
 import (
 	"context"
 
+	"github.com/0gfoundation/0g-storage-client/common"
+	"github.com/0gfoundation/0g-storage-client/indexer"
+	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/0gfoundation/0g-storage-client/transfer/dir"
 	"github.com/sirupsen/logrus"
@@ -38,11 +41,34 @@ func diffDir(*cobra.Command, []string) {
 		logrus.WithError(err).Fatal("Failed to build local file tree")
 	}
 
-	downloader, closer, err := newDownloader(diffDirArgs)
-	if err != nil {
-		logrus.WithError(err).Fatal("Failed to initialize downloader")
+	var downloader transfer.IDownloader
+	if diffDirArgs.indexer != "" {
+		indexerClient, err := indexer.NewClient(diffDirArgs.indexer, indexer.IndexerClientOption{
+			FullTrusted:    false,
+			ProviderOption: providerOption,
+			LogOption:      common.LogOption{Logger: logrus.StandardLogger()},
+		})
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize indexer client")
+		}
+		defer indexerClient.Close()
+		downloader = indexerClient
+	} else {
+		clients := node.MustNewZgsClients(diffDirArgs.nodes, nil, providerOption)
+		closer := func() {
+			for _, client := range clients {
+				client.Close()
+			}
+		}
+		downloaderImpl, err := transfer.NewDownloader(clients, common.LogOption{Logger: logrus.StandardLogger()})
+		if err != nil {
+			closer()
+			logrus.WithError(err).Fatal("Failed to initialize downloader")
+		}
+		downloaderImpl.WithRoutines(diffDirArgs.routines)
+		downloader = downloaderImpl
+		defer closer()
 	}
-	defer closer()
 
 	zgRoot, err := transfer.BuildFileTree(ctx, downloader, diffDirArgs.root, diffDirArgs.proof)
 	if err != nil {
