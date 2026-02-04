@@ -274,19 +274,20 @@ func (c *Client) NewDownloaderFromIndexerNodes(ctx context.Context, root string)
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed to get file locations")
 	}
-	clientUrls := make([]string, 0, len(locations))
-	clients := make([]*node.ZgsClient, 0)
-	for _, location := range locations {
+	selected, covered := shard.Select(locations, 1, "random")
+	if !covered {
+		return nil, fmt.Errorf("file not found or shards incomplete, FindFile triggered, try again later")
+	}
+
+	clientUrls := make([]string, 0, len(selected))
+	clients := make([]*node.ZgsClient, 0, len(selected))
+	for _, location := range selected {
 		client, err := node.NewZgsClient(location.URL, &location.Config, c.option.ProviderOption)
 		if err != nil {
 			c.logger.Debugf("failed to initialize client of node %v, dropped.", location.URL)
 			continue
 		}
-		config, err := client.GetShardConfig(ctx)
-		if err != nil || !config.IsValid() {
-			c.logger.Debugf("failed to get shard config of node %v, dropped.", client.URL())
-			continue
-		}
+
 		clients = append(clients, client)
 		clientUrls = append(clientUrls, location.URL)
 	}
