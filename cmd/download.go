@@ -9,7 +9,6 @@ import (
 	"github.com/0gfoundation/0g-storage-client/indexer"
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -73,11 +72,37 @@ func download(*cobra.Command, []string) {
 		defer cancel()
 	}
 
-	downloader, closer, err := newDownloader(downloadArgs)
-	if err != nil {
-		logrus.WithError(err).Fatal("Failed to initialize downloader")
+	var (
+		downloader transfer.IDownloader
+		closer     func()
+	)
+	if downloadArgs.indexer != "" {
+		indexerClient, err := indexer.NewClient(downloadArgs.indexer, indexer.IndexerClientOption{
+			FullTrusted:    false,
+			ProviderOption: providerOption,
+			LogOption:      common.LogOption{Logger: logrus.StandardLogger()},
+		})
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize indexer client")
+		}
+		defer indexerClient.Close()
+		downloader = indexerClient
+	} else {
+		clients := node.MustNewZgsClients(downloadArgs.nodes, nil, providerOption)
+		closer = func() {
+			for _, client := range clients {
+				client.Close()
+			}
+		}
+		downloaderImpl, err := transfer.NewDownloader(clients, common.LogOption{Logger: logrus.StandardLogger()})
+		if err != nil {
+			closer()
+			logrus.WithError(err).Fatal("Failed to initialize downloader")
+		}
+		downloaderImpl.WithRoutines(downloadArgs.routines)
+		downloader = downloaderImpl
+		defer closer()
 	}
-	defer closer()
 
 	if downloadArgs.root != "" {
 		if err := downloader.Download(ctx, downloadArgs.root, downloadArgs.file, downloadArgs.proof); err != nil {
@@ -88,35 +113,4 @@ func download(*cobra.Command, []string) {
 			logrus.WithError(err).Fatal("Failed to download file")
 		}
 	}
-}
-
-func newDownloader(args downloadArgument) (transfer.IDownloader, func(), error) {
-	if args.indexer != "" {
-		indexerClient, err := indexer.NewClient(args.indexer, indexer.IndexerClientOption{
-			FullTrusted:    false,
-			ProviderOption: providerOption,
-			LogOption:      common.LogOption{Logger: logrus.StandardLogger()},
-		})
-		if err != nil {
-			return nil, nil, errors.WithMessage(err, "failed to initialize indexer client")
-		}
-
-		return indexerClient, indexerClient.Close, nil
-	}
-
-	clients := node.MustNewZgsClients(args.nodes, nil, providerOption)
-	closer := func() {
-		for _, client := range clients {
-			client.Close()
-		}
-	}
-
-	downloader, err := transfer.NewDownloader(clients, common.LogOption{Logger: logrus.StandardLogger()})
-	if err != nil {
-		closer()
-		return nil, nil, err
-	}
-	downloader.WithRoutines(downloadArgs.routines)
-
-	return downloader, closer, nil
 }

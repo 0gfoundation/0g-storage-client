@@ -22,13 +22,11 @@ from test_framework.blockchain_node import BlockChainNodeType
 from client_test_framework.kv_node import KVNode
 from utility.utils import (
     PortMin,
-    MAX_NODES,
     PortCategory,
     arrange_port,
     is_windows_platform,
     wait_until,
 )
-from client_utility.build_binary import build_kv
 
 
 class TestStatus(Enum):
@@ -365,15 +363,7 @@ class ClientTestFramework(TestFramework):
     def setup_kv_node(self, index, stream_ids, updated_config={}):
         local_config = dict(updated_config)
         if "rpc_listen_address" not in local_config:
-            preferred_port = arrange_port(PortCategory.ZGS_KV_RPC, index)
-            selected_port = self._reserve_kv_rpc_port(preferred_port)
-            if selected_port != preferred_port:
-                self.log.warning(
-                    "KV RPC port %d is busy; using %d instead",
-                    preferred_port,
-                    selected_port,
-                )
-            local_config["rpc_listen_address"] = f"127.0.0.1:{selected_port}"
+            local_config["rpc_listen_address"] = f"127.0.0.1:{arrange_port(PortCategory.ZGS_KV_RPC, index)}"
         assert os.path.exists(self.kv_binary), "%s should be exist" % self.kv_binary
         node = KVNode(
             index,
@@ -390,19 +380,6 @@ class ClientTestFramework(TestFramework):
 
         time.sleep(1)
         node.wait_for_rpc_connection()
-
-    def _reserve_kv_rpc_port(self, preferred_port):
-        if preferred_port not in self._kv_reserved_ports and self._is_port_free(preferred_port):
-            self._kv_reserved_ports.add(preferred_port)
-            return preferred_port
-        for offset in range(1, MAX_NODES):
-            candidate = preferred_port + offset
-            if candidate in self._kv_reserved_ports:
-                continue
-            if self._is_port_free(candidate):
-                self._kv_reserved_ports.add(candidate)
-                return candidate
-        raise AssertionError("No free KV RPC ports available starting at %d" % preferred_port)
 
     @staticmethod
     def _is_port_free(port, host="127.0.0.1"):

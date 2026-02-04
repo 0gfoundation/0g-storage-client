@@ -13,7 +13,7 @@ class PortMin:
     n = 11000
 
 
-MAX_NODES = 100
+MAX_NODES = 10
 
 
 class PortCategory(IntEnum):
