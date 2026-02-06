@@ -209,8 +209,14 @@ def sha3(seed):
     return sha3_256(to_string(seed))
 
 
-assert encode_hex(sha3(b"")) == "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-assert encode_hex(sha3(b"\x00" * 256)) == "d397b3b043d87fcd6fad1291ff0bfd16401c274896d8c63a923727f077b8e0b5"
+assert (
+    encode_hex(sha3(b""))
+    == "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+)
+assert (
+    encode_hex(sha3(b"\x00" * 256))
+    == "d397b3b043d87fcd6fad1291ff0bfd16401c274896d8c63a923727f077b8e0b5"
+)
 
 
 @Memoize
@@ -536,12 +542,21 @@ def print_func_call(ignore_first_arg=False, max_call_number=100):
                         f.__name__,
                         this_call_number,
                         ", ".join([display(x) for x in tmp_args]),
-                        ", ".join(display(key) + "=" + to_string(value) for key, value in kwargs.items()),
+                        ", ".join(
+                            display(key) + "=" + to_string(value)
+                            for key, value in kwargs.items()
+                        ),
                     )
                 )
             )
             res = f(*args, **kwargs)
-            print(("{0}#{1} return: {2}".format(f.__name__, this_call_number, display(res))))
+            print(
+                (
+                    "{0}#{1} return: {2}".format(
+                        f.__name__, this_call_number, display(res)
+                    )
+                )
+            )
 
             if local["call_number"] > 100:
                 raise Exception("Touch max call number!")

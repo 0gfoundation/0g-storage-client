@@ -98,8 +98,12 @@ class ZgsNode(TestNode):
     def zgs_download_segment(self, data_root, start_index, end_index):
         return self.rpc.zgs_downloadSegment([data_root, start_index, end_index])
 
-    def zgs_download_segment_decoded(self, data_root: str, start_chunk_index: int, end_chunk_index: int) -> bytes:
-        encodedSegment = self.rpc.zgs_downloadSegment([data_root, start_chunk_index, end_chunk_index])
+    def zgs_download_segment_decoded(
+        self, data_root: str, start_chunk_index: int, end_chunk_index: int
+    ) -> bytes:
+        encodedSegment = self.rpc.zgs_downloadSegment(
+            [data_root, start_chunk_index, end_chunk_index]
+        )
         return None if encodedSegment is None else base64.b64decode(encodedSegment)
 
     def zgs_get_file_info(self, data_root):
@@ -115,8 +119,12 @@ class ZgsNode(TestNode):
     def admin_start_sync_file(self, tx_seq):
         return self.rpc.admin_startSyncFile([tx_seq])
 
-    def admin_start_sync_chunks(self, tx_seq: int, start_chunk_index: int, end_chunk_index: int):
-        return self.rpc.admin_startSyncChunks([tx_seq, start_chunk_index, end_chunk_index])
+    def admin_start_sync_chunks(
+        self, tx_seq: int, start_chunk_index: int, end_chunk_index: int
+    ):
+        return self.rpc.admin_startSyncChunks(
+            [tx_seq, start_chunk_index, end_chunk_index]
+        )
 
     def admin_get_sync_status(self, tx_seq):
         return self.rpc.admin_getSyncStatus([tx_seq])

@@ -154,7 +154,11 @@ class TestNode:
         self.stderr.seek(0)
         stderr = self.stderr.read().decode("utf-8").strip()
         # TODO: Check how to avoid `pthread lock: Invalid argument`.
-        if stderr != expected_stderr and stderr != "pthread lock: Invalid argument" and "pthread_mutex_lock" not in stderr:
+        if (
+            stderr != expected_stderr
+            and stderr != "pthread lock: Invalid argument"
+            and "pthread_mutex_lock" not in stderr
+        ):
             # print process status for debug
             if self.return_code is None:
                 self.log.info("Process is still running")
@@ -351,7 +355,7 @@ class BlockchainNode(TestNode):
             self.log.debug("Market Initialized")
 
             reward_contract.functions.initialize(
-                market_contract.address, mine_contract.address, TX_PARAMS['from']
+                market_contract.address, mine_contract.address, TX_PARAMS["from"]
             ).transact(TX_PARAMS)
             reward_contract.functions.setBaseReward(10**18).transact(TX_PARAMS)
             self.log.debug("Reward Initialized")
@@ -373,7 +377,9 @@ class BlockchainNode(TestNode):
 
     def get_contract(self, contract_address):
         w3 = Web3(
-            HTTPProvider(self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}})
+            HTTPProvider(
+                self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}}
+            )
         )
 
         account1 = w3.eth.account.from_key(GENESIS_PRIV_KEY)
@@ -387,7 +393,9 @@ class BlockchainNode(TestNode):
 
     def wait_for_transaction(self, tx_hash):
         w3 = Web3(
-            HTTPProvider(self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}})
+            HTTPProvider(
+                self.rpc_url, request_kwargs={"proxies": {"http": None, "https": None}}
+            )
         )
         w3.eth.wait_for_transaction_receipt(tx_hash)
 

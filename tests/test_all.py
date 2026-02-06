@@ -18,5 +18,5 @@ if __name__ == "__main__":
         test_dir=os.path.dirname(__file__),
         slow_tests={},
         long_manual_tests={},
-        skip_tests={}
+        skip_tests={},
     )

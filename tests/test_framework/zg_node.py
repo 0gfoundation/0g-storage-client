@@ -78,9 +78,7 @@ class ZGNode(BlockchainNode):
             f"http://127.0.0.1:{arrange_port(PortCategory.ZG_ETH_HTTP, 0)}",
         )
         data_dir = os.path.join(root_dir, "0gchaind", "node" + str(index))
-        rpc_url = os.environ.get(
-            "ZGS_BLOCKCHAIN_RPC_ENDPOINT", "http://127.0.0.1:8545"
-        )
+        rpc_url = os.environ.get("ZGS_BLOCKCHAIN_RPC_ENDPOINT", "http://127.0.0.1:8545")
         self._make_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
         super().__init__(
@@ -113,7 +111,9 @@ class ZGNode(BlockchainNode):
             cwd=self._make_dir,
         )
         assert ret.returncode == 0, "Failed to stop 0gchaind via Makefile"
-        shutil.rmtree(os.path.join(self._make_dir, _chain_data_dir()), ignore_errors=True)
+        shutil.rmtree(
+            os.path.join(self._make_dir, _chain_data_dir()), ignore_errors=True
+        )
         self.running = False
 
     def wait_for_rpc_connection(self):

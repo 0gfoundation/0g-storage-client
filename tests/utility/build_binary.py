@@ -9,10 +9,15 @@ from enum import Enum, unique
 from utility.utils import is_windows_platform, wait_until
 
 # v1.0.0-ci release
-GITHUB_DOWNLOAD_URL = "https://api.github.com/repos/0gfoundation/0g-storage-node/releases/276222268"
+GITHUB_DOWNLOAD_URL = (
+    "https://api.github.com/repos/0gfoundation/0g-storage-node/releases/276222268"
+)
 
 ZG_BINARY = "0gchaind.exe" if is_windows_platform() else "0gchaind"
-CLIENT_BINARY = "0g-storage-client.exe" if is_windows_platform() else "0g-storage-client"
+CLIENT_BINARY = (
+    "0g-storage-client.exe" if is_windows_platform() else "0g-storage-client"
+)
+
 
 @unique
 class BuildBinaryResult(Enum):
@@ -30,10 +35,13 @@ def build_zg(dir: str) -> BuildBinaryResult:
         asset_name=__asset_name(ZG_BINARY, zip=True),
     )
 
-    if result == BuildBinaryResult.AlreadyExists or result == BuildBinaryResult.Installed:
+    if (
+        result == BuildBinaryResult.AlreadyExists
+        or result == BuildBinaryResult.Installed
+    ):
         return result
 
-    raise 
+    raise
 
 
 def build_cli(dir: str) -> BuildBinaryResult:
@@ -97,7 +105,9 @@ def __build_from_github(
     start_time = time.time()
 
     # clone code from github to a temp folder
-    code_tmp_dir_name = (binary_name[:-4] if is_windows_platform() else binary_name) + "_tmp"
+    code_tmp_dir_name = (
+        binary_name[:-4] if is_windows_platform() else binary_name
+    ) + "_tmp"
     code_tmp_dir = os.path.join(dir, code_tmp_dir_name)
     if os.path.exists(code_tmp_dir):
         shutil.rmtree(code_tmp_dir)
@@ -124,7 +134,11 @@ def __build_from_github(
     shutil.rmtree(code_tmp_dir, ignore_errors=True)
 
     print(
-        "Completed to build binary " + binary_name + ", Elapsed: " + str(int(time.time() - start_time)) + " seconds",
+        "Completed to build binary "
+        + binary_name
+        + ", Elapsed: "
+        + str(int(time.time() - start_time))
+        + " seconds",
         flush=True,
     )
 
@@ -154,7 +168,9 @@ def __create_sym_link(src, dst, path=None):
     os.chdir(origin_path)
 
 
-def __download_from_github(dir: str, binary_name: str, github_url: str, asset_name: str) -> BuildBinaryResult:
+def __download_from_github(
+    dir: str, binary_name: str, github_url: str, asset_name: str
+) -> BuildBinaryResult:
     if not os.path.exists(dir):
         os.makedirs(dir, exist_ok=True)
 
@@ -200,7 +216,9 @@ def __download_from_github(dir: str, binary_name: str, github_url: str, asset_na
     wait_until(lambda: os.access(binary_path, os.X_OK), timeout=120)
 
     print(
-        "Completed to download binary, Elapsed: " + str(int(time.time() - start_time)) + " seconds",
+        "Completed to download binary, Elapsed: "
+        + str(int(time.time() - start_time))
+        + " seconds",
         flush=True,
     )
 

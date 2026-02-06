@@ -88,7 +88,9 @@ MIN_DATA_LENGTH = 10
 MAX_U64 = (1 << 64) - 1
 MAX_KEY_LEN = 2000
 
-STREAM_DOMAIN = bytes.fromhex("df2ff3bb0af36c6384e6206552a4ed807f6f6a26e7d0aa6bff772ddc9d4307aa")
+STREAM_DOMAIN = bytes.fromhex(
+    "df2ff3bb0af36c6384e6206552a4ed807f6f6a26e7d0aa6bff772ddc9d4307aa"
+)
 
 
 def with_prefix(x):
@@ -127,7 +129,11 @@ def rand_key():
 
 def rand_write(stream_id=None, key=None, size=None):
     return [
-        (to_stream_id(random.randrange(0, MAX_STREAM_ID)) if stream_id is None else stream_id),
+        (
+            to_stream_id(random.randrange(0, MAX_STREAM_ID))
+            if stream_id is None
+            else stream_id
+        ),
         rand_key() if key is None else key,
         random.randrange(MIN_DATA_LENGTH, MAX_DATA_LENGTH) if size is None else size,
     ]
