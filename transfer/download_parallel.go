@@ -83,11 +83,6 @@ func (downloader *segmentDownloader) ParallelDo(ctx context.Context, routine, ta
 	// there is no not-aligned & segment-crossed file
 	startIndex := segmentIndex * core.DefaultSegmentMaxChunks
 	endIndex := startIndex + core.DefaultSegmentMaxChunks
-	logrus.WithFields(logrus.Fields{
-		"segmentIndex": segmentIndex,
-		"startIndex":   startIndex,
-		"endIndex":     endIndex,
-	}).Debug("Start to download segment")
 	
 	if endIndex > downloader.numChunks {
 		endIndex = downloader.numChunks
