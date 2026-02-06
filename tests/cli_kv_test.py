@@ -40,7 +40,7 @@ class KVTest(ClientTestFramework):
         res = self._kv_read_use_cli(
             self.kv_nodes[0].rpc_url,
             to_stream_id(0),
-            "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20",
+            "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
         )
         for i in range(21):
             assert_equal(res[str(i)], str(i))
