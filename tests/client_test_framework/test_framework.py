@@ -54,9 +54,15 @@ class ClientTestFramework(TestFramework):
         binary_ext = ".exe" if is_windows_platform() else ""
         tests_dir = os.path.dirname(__file_path__)
         root_dir = os.path.dirname(tests_dir)
-        self.__default_zgs_node_binary__ = os.path.join(tests_dir, "tmp", "zgs_node" + binary_ext)
-        self.__default_zgs_cli_binary__ = os.path.join(root_dir, "0g-storage-client" + binary_ext)
-        self.__default_zgs_kv_binary__ = os.path.join(tests_dir, "tmp", "zgs_kv" + binary_ext)
+        self.__default_zgs_node_binary__ = os.path.join(
+            tests_dir, "tmp", "zgs_node" + binary_ext
+        )
+        self.__default_zgs_cli_binary__ = os.path.join(
+            root_dir, "0g-storage-client" + binary_ext
+        )
+        self.__default_zgs_kv_binary__ = os.path.join(
+            tests_dir, "tmp", "zgs_kv" + binary_ext
+        )
 
     def add_arguments(self, parser: argparse.ArgumentParser):
         super().add_arguments(parser)
@@ -74,13 +80,19 @@ class ClientTestFramework(TestFramework):
         self.log.setLevel(logging.DEBUG)
 
         # Create file handler to log all messages
-        fh = logging.FileHandler(self.options.tmpdir + "/test_framework.log", encoding="utf-8")
+        fh = logging.FileHandler(
+            self.options.tmpdir + "/test_framework.log", encoding="utf-8"
+        )
         fh.setLevel(logging.DEBUG)
 
         # Create console handler to log messages to stderr. By default this logs only error messages, but can be configured with --loglevel.
         ch = logging.StreamHandler(sys.stdout)
         # User can provide log level as a number or string (eg DEBUG). loglevel was caught as a string, so try to convert it to an int
-        ll = int(self.options.loglevel) if self.options.loglevel.isdigit() else self.options.loglevel.upper()
+        ll = (
+            int(self.options.loglevel)
+            if self.options.loglevel.isdigit()
+            else self.options.loglevel.upper()
+        )
         ch.setLevel(ll)
 
         # Format logs the same as bitcoind's debug.log with microprecision (so log files can be concatenated and sorted)
@@ -130,7 +142,9 @@ class ClientTestFramework(TestFramework):
         upload_args.append("--file")
         self.log.info("upload file with cli: {}".format(upload_args))
 
-        output = tempfile.NamedTemporaryFile(dir=self.root_dir, delete=False, prefix="zgs_client_output_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self.root_dir, delete=False, prefix="zgs_client_output_"
+        )
         output_name = output.name
         output_fileno = output.fileno()
 
@@ -154,7 +168,9 @@ class ClientTestFramework(TestFramework):
                 if "roots = " in line:
                     root = line.strip().split("roots = ")[1]
         except Exception as ex:
-            self.log.error("Failed to upload file via CLI tool, output: %s", output_name)
+            self.log.error(
+                "Failed to upload file via CLI tool, output: %s", output_name
+            )
             raise ex
         finally:
             output.close()
@@ -178,7 +194,9 @@ class ClientTestFramework(TestFramework):
         remove=True,
     ):
         if file_to_download is None:
-            file_to_download = os.path.join(self.root_dir, "download_{}_{}".format(root, time.time()))
+            file_to_download = os.path.join(
+                self.root_dir, "download_{}_{}".format(root, time.time())
+            )
         download_args = [
             self.cli_binary,
             "download",
@@ -203,7 +221,9 @@ class ClientTestFramework(TestFramework):
             download_args.append(indexer_url)
         self.log.info("download file with cli: {}".format(download_args))
 
-        output = tempfile.NamedTemporaryFile(dir=self.root_dir, delete=False, prefix="zgs_client_output_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self.root_dir, delete=False, prefix="zgs_client_output_"
+        )
         output_name = output.name
         output_fileno = output.fileno()
 
@@ -219,7 +239,9 @@ class ClientTestFramework(TestFramework):
             output.seek(0)
             lines = output.readlines()
         except Exception as ex:
-            self.log.error("Failed to download file via CLI tool, output: %s", output_name)
+            self.log.error(
+                "Failed to download file via CLI tool, output: %s", output_name
+            )
             raise ex
         finally:
             output.close()
@@ -273,7 +295,9 @@ class ClientTestFramework(TestFramework):
             kv_write_args.append(indexer_url)
         self.log.info("kv write with cli: {}".format(kv_write_args))
 
-        output = tempfile.NamedTemporaryFile(dir=self.root_dir, delete=False, prefix="zgs_client_output_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self.root_dir, delete=False, prefix="zgs_client_output_"
+        )
         output_name = output.name
         output_fileno = output.fileno()
 
@@ -318,7 +342,9 @@ class ClientTestFramework(TestFramework):
         ]
         self.log.info("kv read with cli: {}".format(kv_read_args))
 
-        output = tempfile.NamedTemporaryFile(dir=self.root_dir, delete=False, prefix="zgs_client_output_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self.root_dir, delete=False, prefix="zgs_client_output_"
+        )
         output_name = output.name
         output_fileno = output.fileno()
 
@@ -345,7 +371,9 @@ class ClientTestFramework(TestFramework):
             lines,
         )
 
-        decoded_lines = [line.decode("utf-8", errors="replace").strip() for line in lines]
+        decoded_lines = [
+            line.decode("utf-8", errors="replace").strip() for line in lines
+        ]
         non_empty = [line for line in decoded_lines if line]
         if not non_empty:
             raise AssertionError(
@@ -363,7 +391,9 @@ class ClientTestFramework(TestFramework):
     def setup_kv_node(self, index, stream_ids, updated_config={}):
         local_config = dict(updated_config)
         if "rpc_listen_address" not in local_config:
-            local_config["rpc_listen_address"] = f"127.0.0.1:{arrange_port(PortCategory.ZGS_KV_RPC, index)}"
+            local_config["rpc_listen_address"] = (
+                f"127.0.0.1:{arrange_port(PortCategory.ZGS_KV_RPC, index)}"
+            )
         assert os.path.exists(self.kv_binary), "%s should be exist" % self.kv_binary
         node = KVNode(
             index,
@@ -411,8 +441,12 @@ class ClientTestFramework(TestFramework):
         self.log.info("start indexer with args: {}".format(indexer_args))
         data_dir = os.path.join(self.root_dir, "indexer0")
         os.mkdir(data_dir)
-        stdout = tempfile.NamedTemporaryFile(dir=data_dir, prefix="stdout", delete=False)
-        stderr = tempfile.NamedTemporaryFile(dir=data_dir, prefix="stderr", delete=False)
+        stdout = tempfile.NamedTemporaryFile(
+            dir=data_dir, prefix="stdout", delete=False
+        )
+        stderr = tempfile.NamedTemporaryFile(
+            dir=data_dir, prefix="stderr", delete=False
+        )
 
         self.indexer_process = subprocess.Popen(
             indexer_args,
@@ -505,7 +539,9 @@ class ClientTestFramework(TestFramework):
         self.contract_path = os.path.abspath(self.options.contract)
         self.kv_binary = os.path.abspath(self.options.zgs_kv)
 
-        assert os.path.exists(self.contract_path), "%s should be exist" % self.contract_path
+        assert os.path.exists(self.contract_path), (
+            "%s should be exist" % self.contract_path
+        )
 
         if self.options.random_seed is not None:
             random.seed(self.options.random_seed)

@@ -60,16 +60,30 @@ class TestFramework:
         binary_ext = ".exe" if is_windows_platform() else ""
         tests_dir = os.path.dirname(__file_path__)
         root_dir = os.path.dirname(tests_dir)
-        self.__default_conflux_binary__ = os.path.join(tests_dir, "tmp", "conflux" + binary_ext)
-        self.__default_geth_binary__ = os.path.join(tests_dir, "tmp", "geth" + binary_ext)
-        self.__default_zg_binary__ = os.path.join(tests_dir, "tmp", "0gchaind" + binary_ext)
-        self.__default_zgs_node_binary__ = os.path.join(root_dir, "target", "release", "zgs_node" + binary_ext)
-        self.__default_zgs_cli_binary__ = os.path.join(tests_dir, "tmp", "0g-storage-client" + binary_ext)
+        self.__default_conflux_binary__ = os.path.join(
+            tests_dir, "tmp", "conflux" + binary_ext
+        )
+        self.__default_geth_binary__ = os.path.join(
+            tests_dir, "tmp", "geth" + binary_ext
+        )
+        self.__default_zg_binary__ = os.path.join(
+            tests_dir, "tmp", "0gchaind" + binary_ext
+        )
+        self.__default_zgs_node_binary__ = os.path.join(
+            root_dir, "target", "release", "zgs_node" + binary_ext
+        )
+        self.__default_zgs_cli_binary__ = os.path.join(
+            tests_dir, "tmp", "0g-storage-client" + binary_ext
+        )
 
     def __setup_blockchain_node(self):
         if self.blockchain_node_type == BlockChainNodeType.ZG:
-            zg_node_init_genesis(self.blockchain_binary, self.root_dir, self.num_blockchain_nodes)
-            self.log.info("0gchain genesis initialized for %s nodes" % self.num_blockchain_nodes)
+            zg_node_init_genesis(
+                self.blockchain_binary, self.root_dir, self.num_blockchain_nodes
+            )
+            self.log.info(
+                "0gchain genesis initialized for %s nodes" % self.num_blockchain_nodes
+            )
 
         for i in range(self.num_blockchain_nodes):
             if i in self.blockchain_node_configs:
@@ -104,6 +118,7 @@ class TestFramework:
             self.log.debug("Wait for 0gchain node to generate first block")
             time.sleep(0.5)
             for node in self.blockchain_nodes:
+
                 def _peer_count_ok():
                     peer_count = node.net_peerCount()
                     if peer_count is None:
@@ -116,12 +131,14 @@ class TestFramework:
                 wait_until(lambda: node.eth_blockNumber() is not None)
                 wait_until(lambda: int(node.eth_blockNumber(), 16) > 0)
 
-        contract, tx_hash, mine_contract, reward_contract = self.blockchain_nodes[0].setup_contract(
-            self.enable_market, self.mine_period, self.lifetime_seconds
-        )
+        contract, tx_hash, mine_contract, reward_contract = self.blockchain_nodes[
+            0
+        ].setup_contract(self.enable_market, self.mine_period, self.lifetime_seconds)
         self.contract = FlowContractProxy(contract, self.blockchain_nodes)
         self.mine_contract = MineContractProxy(mine_contract, self.blockchain_nodes)
-        self.reward_contract = RewardContractProxy(reward_contract, self.blockchain_nodes)
+        self.reward_contract = RewardContractProxy(
+            reward_contract, self.blockchain_nodes
+        )
 
         for node in self.blockchain_nodes[1:]:
             node.wait_for_transaction(tx_hash)
@@ -133,7 +150,9 @@ class TestFramework:
             else:
                 updated_config = {}
 
-            assert os.path.exists(self.zgs_binary), "%s should be exist" % self.zgs_binary
+            assert os.path.exists(self.zgs_binary), (
+                "%s should be exist" % self.zgs_binary
+            )
             node = ZgsNode(
                 i,
                 self.root_dir,
@@ -151,7 +170,9 @@ class TestFramework:
                 time.sleep(1)
             node.start()
 
-        self.log.info("Wait the zgs_node launch for %d seconds", self.launch_wait_seconds)
+        self.log.info(
+            "Wait the zgs_node launch for %d seconds", self.launch_wait_seconds
+        )
         time.sleep(self.launch_wait_seconds)
 
         for node in self.nodes:
@@ -200,11 +221,17 @@ class TestFramework:
             help="log events at this level and higher to the console. Can be set to DEBUG, INFO, WARNING, ERROR or CRITICAL. Passing --loglevel DEBUG will output all logs to console. Note that logs at all levels are always written to the test_framework.log file in the temporary test directory.",
         )
 
-        parser.add_argument("--tmpdir", dest="tmpdir", help="Root directory for datadirs")
+        parser.add_argument(
+            "--tmpdir", dest="tmpdir", help="Root directory for datadirs"
+        )
 
-        parser.add_argument("--devdir", dest="devdir", help="A softlink point to the last run")
+        parser.add_argument(
+            "--devdir", dest="devdir", help="A softlink point to the last run"
+        )
 
-        parser.add_argument("--randomseed", dest="random_seed", type=int, help="Set a random seed")
+        parser.add_argument(
+            "--randomseed", dest="random_seed", type=int, help="Set a random seed"
+        )
 
         parser.add_argument("--port-min", dest="port_min", default=11000, type=int)
 
@@ -222,13 +249,19 @@ class TestFramework:
         self.log.setLevel(logging.DEBUG)
 
         # Create file handler to log all messages
-        fh = logging.FileHandler(self.options.tmpdir + "/test_framework.log", encoding="utf-8")
+        fh = logging.FileHandler(
+            self.options.tmpdir + "/test_framework.log", encoding="utf-8"
+        )
         fh.setLevel(logging.DEBUG)
 
         # Create console handler to log messages to stderr. By default this logs only error messages, but can be configured with --loglevel.
         ch = logging.StreamHandler(sys.stdout)
         # User can provide log level as a number or string (eg DEBUG). loglevel was caught as a string, so try to convert it to an int
-        ll = int(self.options.loglevel) if self.options.loglevel.isdigit() else self.options.loglevel.upper()
+        ll = (
+            int(self.options.loglevel)
+            if self.options.loglevel.isdigit()
+            else self.options.loglevel.upper()
+        )
         ch.setLevel(ll)
 
         # Format logs the same as bitcoind's debug.log with microprecision (so log files can be concatenated and sorted)
@@ -245,13 +278,15 @@ class TestFramework:
         self.log.addHandler(ch)
 
     def _check_cli_binary(self):
-        if Path(self.cli_binary).absolute() == Path(self.__default_zgs_cli_binary__).absolute() and not os.path.exists(
-            self.cli_binary
-        ):
+        if Path(self.cli_binary).absolute() == Path(
+            self.__default_zgs_cli_binary__
+        ).absolute() and not os.path.exists(self.cli_binary):
             dir = Path(self.cli_binary).parent.absolute()
             build_cli(dir)
 
-        assert os.path.exists(self.cli_binary), "zgs CLI binary not found: %s" % self.cli_binary
+        assert os.path.exists(self.cli_binary), (
+            "zgs CLI binary not found: %s" % self.cli_binary
+        )
 
     def _upload_file_use_cli(
         self,
@@ -279,7 +314,9 @@ class TestFramework:
             "--file",
         ]
 
-        output = tempfile.NamedTemporaryFile(dir=self.root_dir, delete=False, prefix="zgs_client_output_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self.root_dir, delete=False, prefix="zgs_client_output_"
+        )
         output_name = output.name
         output_fileno = output.fileno()
 
@@ -308,7 +345,9 @@ class TestFramework:
                     if index > 0:
                         root = filtered_line[index + 5 : index + 5 + 66]
         except Exception as ex:
-            self.log.error("Failed to upload file via CLI tool, output: %s", output_name)
+            self.log.error(
+                "Failed to upload file via CLI tool, output: %s", output_name
+            )
             raise ex
         finally:
             output.close()
@@ -325,7 +364,9 @@ class TestFramework:
         submissions, data_root = create_submission(chunk_data, TX_PARAMS["from"])
         self.contract.submit(submissions)
         self.num_deployed_contracts += 1
-        wait_until(lambda: self.contract.num_submissions() == self.num_deployed_contracts)
+        wait_until(
+            lambda: self.contract.num_submissions() == self.num_deployed_contracts
+        )
         self.log.info(
             "Submission completed, data root: %s, submissions(%s) = %s",
             data_root,
@@ -346,7 +387,9 @@ class TestFramework:
 
         # Upload file to storage node
         segments = submit_data(client, chunk_data)
-        self.log.info("segments: %s", [(s["root"], s["index"], s["proof"]) for s in segments])
+        self.log.info(
+            "segments: %s", [(s["root"], s["index"], s["proof"]) for s in segments]
+        )
         wait_until(lambda: client.zgs_get_file_info(data_root)["finalized"])
 
         return data_root
@@ -389,7 +432,9 @@ class TestFramework:
             self.options.tmpdir = os.path.abspath(self.options.tmpdir)
             os.makedirs(self.options.tmpdir, exist_ok=True)
         else:
-            self.options.tmpdir = os.getenv("ZGS_TESTS_LOG_DIR", default=tempfile.mkdtemp(prefix="zgs_test_"))
+            self.options.tmpdir = os.getenv(
+                "ZGS_TESTS_LOG_DIR", default=tempfile.mkdtemp(prefix="zgs_test_")
+            )
 
         self.root_dir = self.options.tmpdir
 
@@ -418,7 +463,9 @@ class TestFramework:
         self.cli_binary = os.path.abspath(self.options.cli)
         self.contract_path = os.path.abspath(self.options.contract)
 
-        assert os.path.exists(self.contract_path), "%s should be exist" % self.contract_path
+        assert os.path.exists(self.contract_path), (
+            "%s should be exist" % self.contract_path
+        )
 
         if self.options.random_seed is not None:
             random.seed(self.options.random_seed)

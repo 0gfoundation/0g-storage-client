@@ -31,14 +31,20 @@ class Hasher:
             self.prefix01 = bytes()
 
     def hash_data(self, data):
-        buff = self.prefix00 + (data if isinstance(data, bytes) else data.encode(self.encoding))
+        buff = self.prefix00 + (
+            data if isinstance(data, bytes) else data.encode(self.encoding)
+        )
 
         if self.algorithm != "keccak_256":
             raise NotImplementedError
         return keccak(buff).hex().encode(self.encoding)
 
     def hash_pair(self, left, right):
-        buff = self.prefix01 + bytes.fromhex(left.decode("utf-8")) + bytes.fromhex(right.decode("utf-8"))
+        buff = (
+            self.prefix01
+            + bytes.fromhex(left.decode("utf-8"))
+            + bytes.fromhex(right.decode("utf-8"))
+        )
 
         if self.algorithm != "keccak_256":
             raise NotImplementedError
@@ -151,14 +157,19 @@ class MerkleTree:
         if n < ENTRY_SIZE or (n & (n - 1)) != 0:
             raise Exception("Input length is not power of 2")
 
-        leaves = [Leaf.from_data(data[i : i + ENTRY_SIZE], tree.hasher) for i in range(0, n, ENTRY_SIZE)]
+        leaves = [
+            Leaf.from_data(data[i : i + ENTRY_SIZE], tree.hasher)
+            for i in range(0, n, ENTRY_SIZE)
+        ]
         tree.__leaves = leaves
 
         nodes = leaves
         while len(nodes) > 1:
             next_nodes = []
             for i in range(0, len(nodes), 2):
-                next_nodes.append(Node.from_children(nodes[i], nodes[i + 1], tree.hasher))
+                next_nodes.append(
+                    Node.from_children(nodes[i], nodes[i + 1], tree.hasher)
+                )
 
             nodes = next_nodes
 
@@ -231,11 +242,15 @@ class MerkleTree:
         while current != self.__root:
             if current.parent != None and current.parent.left == current:
                 # add right
-                proof["lemma"].append(add_0x_prefix(self.decode_value(current.parent.right.value)))
+                proof["lemma"].append(
+                    add_0x_prefix(self.decode_value(current.parent.right.value))
+                )
                 proof["path"].append(True)
             else:
                 # add left
-                proof["lemma"].append(add_0x_prefix(self.decode_value(current.parent.left.value)))
+                proof["lemma"].append(
+                    add_0x_prefix(self.decode_value(current.parent.left.value))
+                )
                 proof["path"].append(False)
 
             current = current.parent

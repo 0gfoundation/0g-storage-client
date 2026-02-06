@@ -39,6 +39,7 @@ class PortCategory(IntEnum):
 
 PORT_RANGE = (max(PortCategory) + 1) * MAX_NODES
 
+
 def arrange_port(category: PortCategory, node_index: int) -> int:
     assert node_index <= MAX_NODES
     return PortMin.n + int(category) * MAX_NODES + node_index
@@ -64,9 +65,13 @@ def wait_until(predicate, *, attempts=float("inf"), timeout=float("inf"), lock=N
     # Print the cause of the timeout
     predicate_source = inspect.getsourcelines(predicate)
     if attempt >= attempts:
-        raise AssertionError("Predicate {} not true after {} attempts".format(predicate_source, attempts))
+        raise AssertionError(
+            "Predicate {} not true after {} attempts".format(predicate_source, attempts)
+        )
     elif time.time() >= time_end:
-        raise AssertionError("Predicate {} not true after {} seconds".format(predicate_source, timeout))
+        raise AssertionError(
+            "Predicate {} not true after {} seconds".format(predicate_source, timeout)
+        )
     raise RuntimeError("Unreachable")
 
 
@@ -78,7 +83,9 @@ def initialize_config(config_path, config_parameters):
     with open(config_path, "w") as f:
         for k in config_parameters:
             value = config_parameters[k]
-            if isinstance(value, str) and not (value.startswith('"') or value.startswith("'")):
+            if isinstance(value, str) and not (
+                value.startswith('"') or value.startswith("'")
+            ):
                 if value == "true" or value == "false":
                     value = f"{value}"
                 else:
@@ -110,7 +117,9 @@ def create_proof_and_segment(chunk_data, data_root, index=0):
 
 def assert_equal(thing1, thing2, *args):
     if thing1 != thing2 or any(thing1 != arg for arg in args):
-        raise AssertionError("not(%s)" % " == ".join(str(arg) for arg in (thing1, thing2) + args))
+        raise AssertionError(
+            "not(%s)" % " == ".join(str(arg) for arg in (thing1, thing2) + args)
+        )
 
 
 def assert_ne(thing1, thing2):

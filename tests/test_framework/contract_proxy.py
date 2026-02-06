@@ -11,7 +11,11 @@ class ContractProxy:
         self.blockchain_nodes = blockchain_nodes
 
     def _get_contract(self, node_idx=0):
-        return self.contract if node_idx == 0 else self.blockchain_nodes[node_idx].get_contract(self.contract_address)
+        return (
+            self.contract
+            if node_idx == 0
+            else self.blockchain_nodes[node_idx].get_contract(self.contract_address)
+        )
 
     def _call(self, fn_name, node_idx, *args):
         assert node_idx < len(self.blockchain_nodes)
@@ -38,7 +42,11 @@ class ContractProxy:
 
         contract = self._get_contract(node_idx)
 
-        return getattr(contract.events, event_name).create_filter(fromBlock=0, toBlock="latest").get_all_entries()
+        return (
+            getattr(contract.events, event_name)
+            .create_filter(fromBlock=0, toBlock="latest")
+            .get_all_entries()
+        )
 
     def transfer(self, value, node_idx=0):
         tx_params = copy(TX_PARAMS)
@@ -68,7 +76,9 @@ class FlowContractProxy(ContractProxy):
 
         contract = self._get_contract(node_idx)
         # print(contract.functions.submit(submission_nodes).estimate_gas(combined_tx_prarams))
-        tx_hash = contract.functions.submit(submission_nodes).transact(combined_tx_prarams)
+        tx_hash = contract.functions.submit(submission_nodes).transact(
+            combined_tx_prarams
+        )
         receipt = self.blockchain_nodes[node_idx].wait_for_transaction_receipt(
             contract.w3, tx_hash, parent_hash=parent_hash
         )

@@ -145,7 +145,9 @@ def generate_merkle_tree(data):
         if i * ENTRY_SIZE > len(data):
             tree.encrypt(b"\x00" * ENTRY_SIZE)
         elif (i + 1) * ENTRY_SIZE > len(data):
-            tree.encrypt(data[i * ENTRY_SIZE :] + b"\x00" * ((i + 1) * ENTRY_SIZE - len(data)))
+            tree.encrypt(
+                data[i * ENTRY_SIZE :] + b"\x00" * ((i + 1) * ENTRY_SIZE - len(data))
+            )
         else:
             tree.encrypt(data[i * ENTRY_SIZE : (i + 1) * ENTRY_SIZE])
 
@@ -159,18 +161,34 @@ def generate_merkle_tree_by_batch(data):
     tree = MerkleTree()
     for i in range(0, padded_chunks, PORA_CHUNK_SIZE):
         if i * ENTRY_SIZE >= len(data):
-            tree.add_leaf(Leaf(segment_root(b"\x00" * ENTRY_SIZE * min(PORA_CHUNK_SIZE, padded_chunks - i))))
+            tree.add_leaf(
+                Leaf(
+                    segment_root(
+                        b"\x00" * ENTRY_SIZE * min(PORA_CHUNK_SIZE, padded_chunks - i)
+                    )
+                )
+            )
         elif (i + PORA_CHUNK_SIZE) * ENTRY_SIZE > len(data):
             tree.add_leaf(
                 Leaf(
                     segment_root(
                         data[i * ENTRY_SIZE :]
-                        + b"\x00" * (min(padded_chunks, i + PORA_CHUNK_SIZE) * ENTRY_SIZE - len(data))
+                        + b"\x00"
+                        * (
+                            min(padded_chunks, i + PORA_CHUNK_SIZE) * ENTRY_SIZE
+                            - len(data)
+                        )
                     )
                 )
             )
         else:
-            tree.add_leaf(Leaf(segment_root(data[i * ENTRY_SIZE : (i + PORA_CHUNK_SIZE) * ENTRY_SIZE])))
+            tree.add_leaf(
+                Leaf(
+                    segment_root(
+                        data[i * ENTRY_SIZE : (i + PORA_CHUNK_SIZE) * ENTRY_SIZE]
+                    )
+                )
+            )
 
     return tree, add_0x_prefix(tree.decode_value(tree.get_root_hash()))
 
@@ -200,9 +218,16 @@ def data_to_segments(data):
         proof = tree.proof_at(idx)
 
         tmp = (
-            data[idx * ENTRY_SIZE * PORA_CHUNK_SIZE : (idx + 1) * ENTRY_SIZE * PORA_CHUNK_SIZE]
+            data[
+                idx
+                * ENTRY_SIZE
+                * PORA_CHUNK_SIZE : (idx + 1)
+                * ENTRY_SIZE
+                * PORA_CHUNK_SIZE
+            ]
             if len(data) >= (idx + 1) * PORA_CHUNK_SIZE * ENTRY_SIZE
-            else data[idx * ENTRY_SIZE * PORA_CHUNK_SIZE :] + b"\x00" * (chunks * ENTRY_SIZE - len(data))
+            else data[idx * ENTRY_SIZE * PORA_CHUNK_SIZE :]
+            + b"\x00" * (chunks * ENTRY_SIZE - len(data))
         )
 
         segment = {

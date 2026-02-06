@@ -1,12 +1,19 @@
 from enum import Enum, unique
 
 from utility.utils import is_windows_platform
-from utility.build_binary import __asset_name, __build_from_github, __download_from_github
+from utility.build_binary import (
+    __asset_name,
+    __build_from_github,
+    __download_from_github,
+)
 
-GITHUB_DOWNLOAD_URL = "https://api.github.com/repos/0gfoundation/0g-storage-node/releases/276222268"
+GITHUB_DOWNLOAD_URL = (
+    "https://api.github.com/repos/0gfoundation/0g-storage-node/releases/276222268"
+)
 
 ZGS_BINARY = "zgs_node.exe" if is_windows_platform() else "zgs_node"
 KV_BINARY = "zgs_kv.exe" if is_windows_platform() else "zgs_kv"
+
 
 @unique
 class BuildBinaryResult(Enum):
@@ -24,7 +31,7 @@ def build_zgs(dir: str) -> BuildBinaryResult:
     )
     if result != BuildBinaryResult.NotInstalled:
         return result
-    
+
     return __build_from_github(
         dir=dir,
         binary_name=ZGS_BINARY,
@@ -43,7 +50,7 @@ def build_kv(dir: str) -> BuildBinaryResult:
     )
     if result != BuildBinaryResult.NotInstalled:
         return result
-    
+
     return __build_from_github(
         dir=dir,
         binary_name=KV_BINARY,

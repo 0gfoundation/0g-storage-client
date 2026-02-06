@@ -97,7 +97,9 @@ class KVNode(TestNode):
         start_index = 0
         ans = {"data": b""}
         while True:
-            res = self.kv_get_next(stream_id, key, start_index, bytes_per_query, version)
+            res = self.kv_get_next(
+                stream_id, key, start_index, bytes_per_query, version
+            )
             if res is None:
                 return None
             ans["size"] = res["size"]
@@ -112,7 +114,9 @@ class KVNode(TestNode):
         start_index = 0
         ans = {"data": b""}
         while True:
-            res = self.kv_get_prev(stream_id, key, start_index, bytes_per_query, version)
+            res = self.kv_get_prev(
+                stream_id, key, start_index, bytes_per_query, version
+            )
             if res is None:
                 return None
             ans["size"] = res["size"]
@@ -157,13 +161,19 @@ class KVNode(TestNode):
 
     # rpc
     def kv_get_value(self, stream_id, key, start_index, size, version=None):
-        return self.rpc.kv_getValue([stream_id, self.hex_to_segment(key), start_index, size, version])
+        return self.rpc.kv_getValue(
+            [stream_id, self.hex_to_segment(key), start_index, size, version]
+        )
 
     def kv_get_next(self, stream_id, key, start_index, size, version=None):
-        return self.rpc.kv_getNext([stream_id, self.hex_to_segment(key), start_index, size, False, version])
+        return self.rpc.kv_getNext(
+            [stream_id, self.hex_to_segment(key), start_index, size, False, version]
+        )
 
     def kv_get_prev(self, stream_id, key, start_index, size, version=None):
-        return self.rpc.kv_getPrev([stream_id, self.hex_to_segment(key), start_index, size, False, version])
+        return self.rpc.kv_getPrev(
+            [stream_id, self.hex_to_segment(key), start_index, size, False, version]
+        )
 
     def kv_get_first(self, stream_id, start_index, size, version=None):
         return self.rpc.kv_getFirst([stream_id, start_index, size, version])
@@ -178,7 +188,9 @@ class KVNode(TestNode):
         return self.rpc.kv_getHoldingStreamIds()
 
     def kv_has_write_permission(self, account, stream_id, key, version=None):
-        return self.rpc.kv_hasWritePermission([account, stream_id, self.hex_to_segment(key), version])
+        return self.rpc.kv_hasWritePermission(
+            [account, stream_id, self.hex_to_segment(key), version]
+        )
 
     def kv_is_admin(self, account, stream_id, version=None):
         return self.rpc.kv_isAdmin([account, stream_id, version])
@@ -187,7 +199,9 @@ class KVNode(TestNode):
         return self.rpc.kv_isSpecialKey([stream_id, self.hex_to_segment(key), version])
 
     def kv_is_writer_of_key(self, account, stream_id, key, version=None):
-        return self.rpc.kv_isWriterOfKey([account, stream_id, self.hex_to_segment(key), version])
+        return self.rpc.kv_isWriterOfKey(
+            [account, stream_id, self.hex_to_segment(key), version]
+        )
 
     def kv_is_writer_of_stream(self, account, stream_id, version=None):
         return self.rpc.kv_isWriterOfStream([account, stream_id, version])

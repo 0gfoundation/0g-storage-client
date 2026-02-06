@@ -16,7 +16,9 @@ class FileSegmentUploadTest(ClientTestFramework):
         test_args = [
             "go",
             "run",
-            os.path.join(os.path.dirname(__file__), "go_tests", "segment_upload_test", "main.go"),
+            os.path.join(
+                os.path.dirname(__file__), "go_tests", "segment_upload_test", "main.go"
+            ),
             # arguments passed to go
             GENESIS_PRIV_KEY,
             self.blockchain_nodes[0].rpc_url,

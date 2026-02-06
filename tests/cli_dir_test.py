@@ -16,7 +16,9 @@ from splitable_upload_test import files_are_equal
 
 def directories_are_equal(dir1, dir2):
     for root, dirs, files in os.walk(dir1):
-        rel_path = os.path.relpath(root, dir1)  # relative path within the directory structure
+        rel_path = os.path.relpath(
+            root, dir1
+        )  # relative path within the directory structure
         compare_root = os.path.join(dir2, rel_path)
 
         if not os.path.exists(compare_root):
@@ -171,9 +173,13 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
             upload_args.append(str(fragment_size))
 
         upload_args.append("--file")
-        self.log.info("upload directory with cli: {}".format(upload_args + [dir_to_upload.name]))
+        self.log.info(
+            "upload directory with cli: {}".format(upload_args + [dir_to_upload.name])
+        )
 
-        output = tempfile.NamedTemporaryFile(dir=self.root_dir, delete=False, prefix="zgs_client_output_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self.root_dir, delete=False, prefix="zgs_client_output_"
+        )
         output_name = output.name
         output_fileno = output.fileno()
 
@@ -201,7 +207,9 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
                     root = match.group(1)
                     break
         except Exception as ex:
-            self.log.error("Failed to upload directory via CLI tool, output: %s", output_name)
+            self.log.error(
+                "Failed to upload directory via CLI tool, output: %s", output_name
+            )
             raise ex
         finally:
             output.close()
@@ -225,7 +233,9 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         remove=True,
     ):
         if dir_to_download is None:
-            dir_to_download = os.path.join(self.root_dir, "download_{}_{}".format(root, time.time()))
+            dir_to_download = os.path.join(
+                self.root_dir, "download_{}_{}".format(root, time.time())
+            )
         download_args = [
             self.cli_binary,
             "download-dir",
@@ -248,9 +258,13 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         elif indexer_url is not None:
             download_args.append("--indexer")
             download_args.append(indexer_url)
-        self.log.info("download directory with cli: {}".format(download_args + [dir_to_download]))
+        self.log.info(
+            "download directory with cli: {}".format(download_args + [dir_to_download])
+        )
 
-        output = tempfile.NamedTemporaryFile(dir=self.root_dir, delete=False, prefix="zgs_client_output_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self.root_dir, delete=False, prefix="zgs_client_output_"
+        )
         output_name = output.name
         output_fileno = output.fileno()
 
@@ -266,7 +280,9 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
             output.seek(0)
             lines = output.readlines()
         except Exception as ex:
-            self.log.error("Failed to download directory via CLI tool, output: %s", output_name)
+            self.log.error(
+                "Failed to download directory via CLI tool, output: %s", output_name
+            )
             raise ex
         finally:
             output.close()
