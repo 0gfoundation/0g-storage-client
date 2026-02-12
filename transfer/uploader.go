@@ -59,6 +59,7 @@ type UploadOption struct {
 	Step             int64               // step for uploading
 	Method           string              // method for selecting nodes, can be "max", "random" or certain positive number in string
 	FullTrusted      bool                // whether to use full trusted nodes
+	EncryptionKey    []byte              // optional 32-byte AES-256 encryption key; when set, data is encrypted before upload
 }
 
 // SubmitLogEntryOption option for submitting log entry
@@ -223,6 +224,21 @@ func (uploader *Uploader) Upload(ctx context.Context, data core.IterableData, op
 		}
 		opt.Submitter = submitter
 	}
+	// Wrap data with encryption if an encryption key is provided
+	if len(opt.EncryptionKey) > 0 {
+		if len(opt.EncryptionKey) != 32 {
+			return common.Hash{}, common.Hash{}, errors.New("encryption key must be 32 bytes")
+		}
+		var key [32]byte
+		copy(key[:], opt.EncryptionKey)
+		encData, err := core.NewEncryptedData(data, key)
+		if err != nil {
+			return common.Hash{}, common.Hash{}, errors.WithMessage(err, "Failed to create encrypted data")
+		}
+		data = encData
+		uploader.logger.Info("Data encryption enabled")
+	}
+
 	fastMode := opt.FastMode && data.Size() <= fastUploadMaxSize
 	if opt.FastMode && !fastMode {
 		uploader.logger.WithField("size", data.Size()).Info("Fast mode disabled for data size over limit")

@@ -11,10 +11,10 @@ Go implementation for client to interact with storage nodes in 0G Storage networ
 
 Following packages can help applications to integrate with 0g storage network:
 
-- **[core](core)**: provides underlying utilities to build merkle tree for files or iterable data, and defines data padding standard to interact with [Flow contract](contract/contract.go).
+- **[core](core)**: provides underlying utilities to build merkle tree for files or iterable data, defines data padding standard to interact with [Flow contract](contract/contract.go), and implements client-side AES-256-CTR encryption for file uploads.
 - **[node](node)**: defines RPC client structures to facilitate RPC interactions with 0g storage nodes and 0g key-value (KV) nodes.
-- **[kv](kv)**: defines structures to interact with 0g storage kv.
-- **[transfer](transfer)** : defines data structures and functions for transferring data between local and 0g storage.
+- **[kv](kv)**: defines structures to interact with 0g storage kv, with optional stream data encryption via `UploadOption.EncryptionKey`.
+- **[transfer](transfer)**: defines data structures and functions for transferring data between local and 0g storage, including encrypted upload/download support via `UploadOption.EncryptionKey` and `Downloader.WithEncryptionKey`.
 - **[indexer](indexer)**: select storage nodes to upload data from indexer which maintains trusted node list. Besides, allow clients to download files via HTTP GET requests.
 
 ## CLI
@@ -53,12 +53,30 @@ To generate a file for test purpose, with a fixed file size or random file size 
 
 The client will submit the data segments to the storage nodes which is determined by the indexer according to their shard configurations.
 
+**Upload with encryption**
+
+Encrypt files client-side using AES-256-CTR before uploading. The encryption key is a hex-encoded 32-byte key with `0x` prefix:
+
+```
+./0g-storage-client upload --url <blockchain_rpc_endpoint> --key <private_key> --indexer <storage_indexer_endpoint> --file <file_path> --encryption-key <0x_hex_encoded_32_byte_key>
+```
+
 **Download file**
 ```
 ./0g-storage-client download --indexer <storage_indexer_endpoint> --root <file_root_hash> --file <output_file_path>
 ```
 
 If you want to verify the **merkle proof** of downloaded segment, please specify `--proof` option.
+
+**Download with decryption**
+
+To download and decrypt a file that was uploaded with an encryption key:
+
+```
+./0g-storage-client download --indexer <storage_indexer_endpoint> --root <file_root_hash> --file <output_file_path> --encryption-key <0x_hex_encoded_32_byte_key>
+```
+
+The encryption key must match the one used during upload.
 
 **Write to KV**
 
@@ -69,13 +87,21 @@ By indexer:
 
 `--stream-keys` and `--stream-values` are comma separated string list and their length must be equal.
 
+**Write to KV with encryption**
+
+```
+./0g-storage-client kv-write --url <blockchain_rpc_endpoint> --key <private_key> --indexer <storage_indexer_endpoint> --stream-id <stream_id> --stream-keys <stream_keys> --stream-values <stream_values> --encryption-key <0x_hex_encoded_32_byte_key>
+```
+
+The entire stream data is encrypted client-side using AES-256-CTR before uploading. The KV node must be configured with the encryption key to decrypt and replay the data.
+
 **Read from KV**
 
 ```
 ./0g-storage-client kv-read --node <kv_node_rpc_endpoint> --stream-id <stream_id> --stream-keys <stream_keys>
 ```
 
-Please pay attention here `--node` is the url of a KV node.
+Please pay attention here `--node` is the url of a KV node. If data was written with encryption, the KV node handles decryption during replay — no encryption key is needed for reading.
 
 ## Indexer
 

@@ -23,6 +23,7 @@ from client_test_framework.kv_node import KVNode
 from utility.utils import (
     PortMin,
     PortCategory,
+    PORT_RANGE,
     arrange_port,
     is_windows_platform,
     wait_until,
@@ -117,6 +118,7 @@ class ClientTestFramework(TestFramework):
         file_to_upload,
         fragment_size=None,
         skip_tx=True,
+        encryption_key=None,
     ):
         upload_args = [
             self.cli_binary,
@@ -138,6 +140,9 @@ class ClientTestFramework(TestFramework):
         if fragment_size is not None:
             upload_args.append("--fragment-size")
             upload_args.append(str(fragment_size))
+        if encryption_key is not None:
+            upload_args.append("--encryption-key")
+            upload_args.append(encryption_key)
 
         upload_args.append("--file")
         self.log.info("upload file with cli: {}".format(upload_args))
@@ -192,6 +197,7 @@ class ClientTestFramework(TestFramework):
         file_to_download=None,
         with_proof=True,
         remove=True,
+        encryption_key=None,
     ):
         if file_to_download is None:
             file_to_download = os.path.join(
@@ -212,6 +218,10 @@ class ClientTestFramework(TestFramework):
         elif roots is not None:
             download_args.append("--roots")
             download_args.append(roots)
+
+        if encryption_key is not None:
+            download_args.append("--encryption-key")
+            download_args.append(encryption_key)
 
         if node_rpc_url is not None:
             download_args.append("--node")
@@ -267,6 +277,7 @@ class ClientTestFramework(TestFramework):
         kv_keys,
         kv_values,
         skip_tx=True,
+        encryption_key=None,
     ):
         kv_write_args = [
             self.cli_binary,
@@ -293,6 +304,9 @@ class ClientTestFramework(TestFramework):
         elif indexer_url is not None:
             kv_write_args.append("--indexer")
             kv_write_args.append(indexer_url)
+        if encryption_key is not None:
+            kv_write_args.append("--encryption-key")
+            kv_write_args.append(encryption_key)
         self.log.info("kv write with cli: {}".format(kv_write_args))
 
         output = tempfile.NamedTemporaryFile(
@@ -438,7 +452,9 @@ class ClientTestFramework(TestFramework):
         if discover_node is not None:
             indexer_args.append("--node")
             indexer_args.append(discover_node)
-        self.log.info("start indexer with args: {}".format(indexer_args))
+
+        indexer_port = arrange_port(PortCategory.ZGS_INDEXER_RPC, 0)
+        self.log.info("start indexer [RPC: %d] with args: %s", indexer_port, indexer_args)
         data_dir = os.path.join(self.root_dir, "indexer0")
         os.mkdir(data_dir)
         stdout = tempfile.NamedTemporaryFile(
@@ -500,6 +516,10 @@ class ClientTestFramework(TestFramework):
         self.add_arguments(parser)
         self.options = parser.parse_args()
         PortMin.n = self.options.port_min
+
+        # Calculate and log port range
+        port_max = self.options.port_min + PORT_RANGE
+        print(f"[PORT INFO] Test assigned port range: {self.options.port_min}-{port_max-1} (range size: {PORT_RANGE})", flush=True)
 
         # Set up temp directory and start logging
         if self.options.tmpdir:

@@ -50,7 +50,7 @@ func (c *Client) GetValue(ctx context.Context, streamId common.Hash, key []byte,
 	for {
 		var seg *node.Value
 		seg, err = c.node.GetValue(ctx, streamId, key, uint64(len(val.Data)), maxQuerySize, val.Version)
-		
+
 		if err != nil {
 			return
 		}

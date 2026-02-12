@@ -42,6 +42,11 @@ func (b *Batcher) Exec(ctx context.Context, option ...transfer.UploadOption) (co
 	}
 
 	encoded, err := streamData.Encode()
+	logrus.WithFields(logrus.Fields{
+		"version": streamData.Version,
+		"data":    encoded,
+	}).Debug("Built stream data")
+
 	if err != nil {
 		return common.Hash{}, errors.WithMessage(err, "Failed to encode data")
 	}

@@ -64,6 +64,8 @@ type uploadArgument struct {
 
 	timeout time.Duration
 
+	encryptionKey string
+
 	flowAddress   string
 	marketAddress string
 }
@@ -96,6 +98,8 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().BoolVar(&args.fullTrusted, "full-trusted", true, "whether to use full trusted nodes")
 
 	cmd.Flags().DurationVar(&args.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
+
+	cmd.Flags().StringVar(&args.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 encryption key for file encryption")
 
 	cmd.Flags().StringVar(&args.flowAddress, "flow-address", "", "Flow contract address (skip storage node status call when set)")
 	cmd.Flags().StringVar(&args.marketAddress, "market-address", "", "Market contract address (optional, skip flow lookup when set)")
@@ -162,6 +166,18 @@ func upload(*cobra.Command, []string) {
 	if uploadArgs.maxGasPrice > 0 {
 		maxGasPrice = big.NewInt(int64(uploadArgs.maxGasPrice))
 	}
+	var encryptionKey []byte
+	if uploadArgs.encryptionKey != "" {
+		var err error
+		encryptionKey, err = hexutil.Decode(uploadArgs.encryptionKey)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to decode encryption key")
+		}
+		if len(encryptionKey) != 32 {
+			logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
+		}
+	}
+
 	opt := transfer.UploadOption{
 		Submitter:        submitter,
 		Tags:             hexutil.MustDecode(uploadArgs.tags),
@@ -177,6 +193,7 @@ func upload(*cobra.Command, []string) {
 		Method:           uploadArgs.method,
 		FullTrusted:      uploadArgs.fullTrusted,
 		FastMode:         uploadArgs.fastMode,
+		EncryptionKey:    encryptionKey,
 	}
 
 	file, err := core.Open(uploadArgs.file)
