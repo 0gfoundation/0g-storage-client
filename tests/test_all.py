@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     run_all(
         test_dir=os.path.dirname(__file__),
-        slow_tests={},
+        slow_tests={"cli_file_upload_download_test.py", "cli_file_encrypted_upload_download_test.py"},
         long_manual_tests={},
         skip_tests={},
     )

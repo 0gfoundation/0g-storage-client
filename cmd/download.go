@@ -9,6 +9,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/indexer"
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,8 @@ type downloadArgument struct {
 	root  string
 	roots []string
 	proof bool
+
+	encryptionKey string
 
 	routines int
 
@@ -42,6 +45,8 @@ func bindDownloadFlags(cmd *cobra.Command, args *downloadArgument) {
 	cmd.MarkFlagsMutuallyExclusive("root", "roots")
 
 	cmd.Flags().BoolVar(&args.proof, "proof", false, "Whether to download with merkle proof for validation")
+
+	cmd.Flags().StringVar(&args.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 encryption key for file decryption")
 
 	cmd.Flags().IntVar(&args.routines, "routines", runtime.GOMAXPROCS(0), "number of go routines for downloading simultaneously")
 
@@ -100,6 +105,18 @@ func download(*cobra.Command, []string) {
 			logrus.WithError(err).Fatal("Failed to initialize downloader")
 		}
 		downloaderImpl.WithRoutines(downloadArgs.routines)
+		if downloadArgs.encryptionKey != "" {
+			keyBytes, err := hexutil.Decode(downloadArgs.encryptionKey)
+			if err != nil {
+				closer()
+				logrus.WithError(err).Fatal("Failed to decode encryption key")
+			}
+			if len(keyBytes) != 32 {
+				closer()
+				logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
+			}
+			downloaderImpl.WithEncryptionKey(keyBytes)
+		}
 		downloader = downloaderImpl
 		defer closer()
 	}

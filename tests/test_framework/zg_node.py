@@ -38,8 +38,9 @@ def zg_node_init_genesis(binary: str, root_dir: str, num_nodes: int):
     assert num_nodes == 1, "Makefile deploy only supports one blockchain node"
 
     tests_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    os.environ["ZGS_BLOCKCHAIN_RPC_ENDPOINT"] = (
-        f"http://127.0.0.1:{arrange_port(PortCategory.ZG_ETH_HTTP, 0)}"
+    os.environ.setdefault(
+        "ZGS_BLOCKCHAIN_RPC_ENDPOINT",
+        f"http://127.0.0.1:{arrange_port(PortCategory.ZG_ETH_HTTP, 0)}",
     )
 
     log_file = tempfile.NamedTemporaryFile(
@@ -73,12 +74,11 @@ class ZGNode(BlockchainNode):
         assert index == 0, "Makefile start only supports one blockchain node"
 
         self._root_dir = root_dir
-        os.environ.setdefault(
+        data_dir = os.path.join(root_dir, "0gchaind", "node" + str(index))
+        rpc_url = os.environ.get(
             "ZGS_BLOCKCHAIN_RPC_ENDPOINT",
             f"http://127.0.0.1:{arrange_port(PortCategory.ZG_ETH_HTTP, 0)}",
         )
-        data_dir = os.path.join(root_dir, "0gchaind", "node" + str(index))
-        rpc_url = os.environ.get("ZGS_BLOCKCHAIN_RPC_ENDPOINT", "http://127.0.0.1:8545")
         self._make_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
         super().__init__(
@@ -97,7 +97,11 @@ class ZGNode(BlockchainNode):
         """Already initialized by Makefile deploy"""
 
     def start(self):
-        self.log.info("Starting 0gchaind via Makefile")
+        eth_http = arrange_port(PortCategory.ZG_ETH_HTTP, 0)
+        eth_ws = arrange_port(PortCategory.ZG_ETH_WS, 0)
+        consensus_rpc = arrange_port(PortCategory.ZG_CONSENSUS_RPC, 0)
+        self.log.info("Starting 0gchaind via Makefile [ETH_HTTP: %d, ETH_WS: %d, CONSENSUS_RPC: %d]",
+                      eth_http, eth_ws, consensus_rpc)
         ret = subprocess.run(
             args=_chain_make_args(self._root_dir, "start"),
             cwd=self._make_dir,

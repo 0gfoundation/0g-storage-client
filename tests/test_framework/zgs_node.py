@@ -85,7 +85,9 @@ class ZgsNode(TestNode):
         self._wait_for_rpc_connection(lambda rpc: rpc.zgs_getStatus() is not None)
 
     def start(self):
-        self.log.info("Start zerog_storage node %d", self.index)
+        rpc_port = arrange_port(PortCategory.ZGS_RPC, self.index)
+        p2p_port = arrange_port(PortCategory.ZGS_P2P, self.index)
+        self.log.info("Start zerog_storage node %d [RPC: %d, P2P: %d]", self.index, rpc_port, p2p_port)
         super().start()
 
     # rpc

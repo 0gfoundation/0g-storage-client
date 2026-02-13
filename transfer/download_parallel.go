@@ -39,8 +39,8 @@ func newSegmentDownloader(downloader *Downloader, info *node.FileInfo, file *dow
 	endSegmentIndex := (info.Tx.StartEntryIndex + core.NumSplits(int64(info.Tx.Size), core.DefaultChunkSize) - 1) / core.DefaultSegmentMaxChunks
 
 	logrus.WithFields(logrus.Fields{
-		"size":               info.Tx.Size,
-		"startEntryIndex":    info.Tx.StartEntryIndex,
+		"size":              info.Tx.Size,
+		"startEntryIndex":   info.Tx.StartEntryIndex,
 		"numChunks":         core.NumSplits(int64(info.Tx.Size), core.DefaultChunkSize),
 		"startSegmentIndex": startSegmentIndex,
 		"endSegmentIndex":   endSegmentIndex,
@@ -83,7 +83,7 @@ func (downloader *segmentDownloader) ParallelDo(ctx context.Context, routine, ta
 	// there is no not-aligned & segment-crossed file
 	startIndex := segmentIndex * core.DefaultSegmentMaxChunks
 	endIndex := startIndex + core.DefaultSegmentMaxChunks
-	
+
 	if endIndex > downloader.numChunks {
 		endIndex = downloader.numChunks
 	}

@@ -30,7 +30,7 @@ var _ IterableData = (*File)(nil)
 func (file *File) Read(buf []byte, offset int64) (int, error) {
 	n, err := file.underlying.ReadAt(buf, file.offset+offset)
 	// unexpected IO error
-	if !errors.Is(err, io.EOF) {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return 0, err
 	}
 	return n, nil

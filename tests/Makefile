@@ -226,14 +226,10 @@ stop:
 	-@if [ -f "$(DATA_DIR)/reth.pid" ]; then \
 		kill $$(cat "$(DATA_DIR)/reth.pid") 2>/dev/null || true; \
 		rm -f "$(DATA_DIR)/reth.pid"; \
-	else \
-		pkill -f "$(GETH_BIN)" 2>/dev/null || true; \
 	fi
 	-@if [ -f "$(DATA_DIR)/chaind.pid" ]; then \
 		kill $$(cat "$(DATA_DIR)/chaind.pid") 2>/dev/null || true; \
 		rm -f "$(DATA_DIR)/chaind.pid"; \
-	else \
-		pkill -f "$(CHAIND_BIN)" 2>/dev/null || true; \
 	fi
 	@sleep 2
 	@printf "$(GREEN)All processes stopped!$(NC)\n"

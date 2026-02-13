@@ -33,6 +33,8 @@ type Downloader struct {
 
 	routines int
 
+	encryptionKey []byte // optional 32-byte AES-256 decryption key
+
 	logger *logrus.Logger
 }
 
@@ -51,6 +53,13 @@ func NewDownloader(clients []*node.ZgsClient, opts ...zg_common.LogOption) (*Dow
 
 func (downloader *Downloader) WithRoutines(routines int) *Downloader {
 	downloader.routines = routines
+	return downloader
+}
+
+// WithEncryptionKey sets the encryption key for post-download decryption.
+// The key must be exactly 32 bytes (AES-256).
+func (downloader *Downloader) WithEncryptionKey(key []byte) *Downloader {
+	downloader.encryptionKey = key
 	return downloader
 }
 
@@ -109,6 +118,13 @@ func (downloader *Downloader) Download(ctx context.Context, root, filename strin
 	// Validate the downloaded file
 	if err = downloader.validateDownloadFile(root, filename, int64(info.Tx.Size)); err != nil {
 		return errors.WithMessage(err, "Failed to validate downloaded file")
+	}
+
+	// Decrypt the file if an encryption key is set
+	if len(downloader.encryptionKey) > 0 {
+		if err = downloader.decryptDownloadedFile(filename); err != nil {
+			return errors.WithMessage(err, "Failed to decrypt downloaded file")
+		}
 	}
 
 	return nil
@@ -204,6 +220,32 @@ func (downloader *Downloader) validateDownloadFile(root, filename string, fileSi
 	}
 
 	downloader.logger.Info("Succeeded to validate the downloaded file")
+
+	return nil
+}
+
+func (downloader *Downloader) decryptDownloadedFile(filename string) error {
+	if len(downloader.encryptionKey) != 32 {
+		return errors.New("encryption key must be 32 bytes")
+	}
+
+	encrypted, err := os.ReadFile(filename)
+	if err != nil {
+		return errors.WithMessage(err, "Failed to read encrypted file")
+	}
+
+	var key [32]byte
+	copy(key[:], downloader.encryptionKey)
+	decrypted, err := core.DecryptFile(&key, encrypted)
+	if err != nil {
+		return errors.WithMessage(err, "Failed to decrypt file")
+	}
+
+	if err := os.WriteFile(filename, decrypted, 0644); err != nil {
+		return errors.WithMessage(err, "Failed to write decrypted file")
+	}
+
+	downloader.logger.Info("Succeeded to decrypt the downloaded file")
 
 	return nil
 }
