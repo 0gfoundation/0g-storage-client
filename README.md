@@ -1,6 +1,6 @@
 # 0G Storage Client
 
-Go implementation for client to interact with storage nodes in 0G Storage network. For more details, please read the [docs](https://docs.0g.ai/build-with-0g/storage-sdk).
+Go implementation for client to interact with storage nodes in 0G Storage network. For more details, please read the [docs](https://docs.0g.ai/developer-hub/building-on-0g/storage/sdk).
 
 [![API Reference](https://pkg.go.dev/badge/github.com/0glabs/0g-storage-client)](https://pkg.go.dev/github.com/0glabs/0g-storage-client)
 [![Go Report Card](https://goreportcard.com/badge/github.com/0glabs/0g-storage-client)](https://goreportcard.com/report/github.com/0glabs/0g-storage-client)
@@ -110,7 +110,7 @@ Indexer service provides RPC to index storages nodes in two ways:
 - Trusted nodes: well maintained and provides stable service.
 - Discovered nodes: discovered in the whole P2P network.
 
-Please refer to the [RPC API](https://docs.0g.ai/run-a-node/testnet-information) documentation for more details.
+Please refer to the [RPC API](https://docs.0g.ai/developer-hub/testnet/testnet-overview) documentation for more details.
 
 Besides, the Indexer provides a RESTful API gateway for file downloads and uploads.
 
