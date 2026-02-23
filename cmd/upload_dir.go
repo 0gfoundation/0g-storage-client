@@ -62,6 +62,17 @@ func uploadDir(*cobra.Command, []string) {
 	if uploadDirArgs.finalityRequired {
 		finalityRequired = transfer.FileFinalized
 	}
+	var encryptionKey []byte
+	if uploadDirArgs.encryptionKey != "" {
+		var err error
+		encryptionKey, err = hexutil.Decode(uploadDirArgs.encryptionKey)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to decode encryption key")
+		}
+		if len(encryptionKey) != 32 {
+			logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
+		}
+	}
 	opt := transfer.UploadOption{
 		Submitter:        submitter,
 		Tags:             hexutil.MustDecode(uploadDirArgs.tags),
@@ -71,6 +82,7 @@ func uploadDir(*cobra.Command, []string) {
 		SkipTx:           uploadDirArgs.skipTx,
 		Method:           uploadDirArgs.method,
 		FullTrusted:      uploadDirArgs.fullTrusted,
+		EncryptionKey:    encryptionKey,
 	}
 
 	uploader, closer, err := transfer.NewUploaderFromConfig(ctx, w3client, transfer.UploaderConfig{
