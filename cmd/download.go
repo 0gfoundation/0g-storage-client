@@ -91,6 +91,16 @@ func download(*cobra.Command, []string) {
 			logrus.WithError(err).Fatal("Failed to initialize indexer client")
 		}
 		defer indexerClient.Close()
+		if downloadArgs.encryptionKey != "" {
+			keyBytes, err := hexutil.Decode(downloadArgs.encryptionKey)
+			if err != nil {
+				logrus.WithError(err).Fatal("Failed to decode encryption key")
+			}
+			if len(keyBytes) != 32 {
+				logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
+			}
+			indexerClient.WithEncryptionKey(keyBytes)
+		}
 		downloader = indexerClient
 	} else {
 		clients := node.MustNewZgsClients(downloadArgs.nodes, nil, providerOption)

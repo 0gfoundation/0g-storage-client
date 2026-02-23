@@ -143,6 +143,28 @@ func DecryptFile(key *[32]byte, encrypted []byte) ([]byte, error) {
 	return data, nil
 }
 
+// DecryptFragmentData decrypts a single fragment from a multi-fragment encrypted file.
+// For the first fragment (isFirstFragment=true): strips the encryption header and decrypts
+// the remaining data starting at CTR offset 0.
+// For subsequent fragments: decrypts all bytes using the given dataOffset into the plaintext stream.
+// Returns the decrypted plaintext and the updated cumulative data offset.
+func DecryptFragmentData(key *[32]byte, header *EncryptionHeader, fragmentData []byte, isFirstFragment bool, dataOffset uint64) ([]byte, uint64, error) {
+	if isFirstFragment {
+		if len(fragmentData) < EncryptionHeaderSize {
+			return nil, 0, fmt.Errorf("first fragment too short for encryption header: %d bytes", len(fragmentData))
+		}
+		dataBytes := make([]byte, len(fragmentData)-EncryptionHeaderSize)
+		copy(dataBytes, fragmentData[EncryptionHeaderSize:])
+		CryptAt(key, &header.Nonce, 0, dataBytes)
+		return dataBytes, uint64(len(dataBytes)), nil
+	}
+
+	dataCopy := make([]byte, len(fragmentData))
+	copy(dataCopy, fragmentData)
+	CryptAt(key, &header.Nonce, dataOffset, dataCopy)
+	return dataCopy, dataOffset + uint64(len(dataCopy)), nil
+}
+
 // DecryptSegment decrypts a single downloaded segment.
 // For segment 0: the first EncryptionHeaderSize bytes are the header, the rest is encrypted data starting at offset 0.
 // For other segments: all bytes are encrypted data at the correct offset.

@@ -23,7 +23,13 @@ from test_framework.contract_proxy import (
 from test_framework.zgs_node import ZgsNode
 from test_framework.blockchain_node import BlockChainNodeType
 from test_framework.zg_node import ZGNode, zg_node_init_genesis
-from utility.utils import PortMin, PORT_RANGE, is_windows_platform, wait_until, assert_equal
+from utility.utils import (
+    PortMin,
+    PORT_RANGE,
+    is_windows_platform,
+    wait_until,
+    assert_equal,
+)
 from utility.build_binary import build_cli
 from utility.submission import create_submission, submit_data
 
@@ -429,7 +435,10 @@ class TestFramework:
 
         # Calculate and log port range
         port_max = self.options.port_min + PORT_RANGE
-        print(f"[PORT INFO] Test assigned port range: {self.options.port_min}-{port_max-1} (range size: {PORT_RANGE})", flush=True)
+        print(
+            f"[PORT INFO] Test assigned port range: {self.options.port_min}-{port_max-1} (range size: {PORT_RANGE})",
+            flush=True,
+        )
 
         # Set up temp directory and start logging
         if self.options.tmpdir:

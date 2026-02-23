@@ -68,6 +68,14 @@ Encrypt files client-side using AES-256-CTR before uploading. The encryption key
 
 If you want to verify the **merkle proof** of downloaded segment, please specify `--proof` option.
 
+**Encrypted upload with fragment splitting**
+
+Encryption works with `--fragment-size` for large files. The file is encrypted first, then split into fragments:
+
+```
+./0g-storage-client upload --url <blockchain_rpc_endpoint> --key <private_key> --indexer <storage_indexer_endpoint> --file <file_path> --encryption-key <0x_hex_encoded_32_byte_key> --fragment-size <size_in_bytes>
+```
+
 **Download with decryption**
 
 To download and decrypt a file that was uploaded with an encryption key:
@@ -77,6 +85,14 @@ To download and decrypt a file that was uploaded with an encryption key:
 ```
 
 The encryption key must match the one used during upload.
+
+**Download encrypted fragments**
+
+To download and decrypt a file that was uploaded with both encryption and fragment splitting:
+
+```
+./0g-storage-client download --indexer <storage_indexer_endpoint> --roots <comma_separated_root_hashes> --file <output_file_path> --encryption-key <0x_hex_encoded_32_byte_key>
+```
 
 **Write to KV**
 

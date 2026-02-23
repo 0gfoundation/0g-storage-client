@@ -164,10 +164,35 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 	fragmentSize = int64(core.NextPow2(uint64(fragmentSize)))
 	uploader.logger.Infof("fragment size: %v", fragmentSize)
 
+	var opt UploadOption
+	if len(option) > 0 {
+		opt = option[0]
+	}
+
+	// Wrap data with encryption BEFORE splitting so that the encrypted stream
+	// (including the 17-byte header) is what gets fragmented. This ensures the
+	// header ends up in fragment 0 and all fragments contain encrypted bytes.
+	if len(opt.EncryptionKey) > 0 {
+		if len(opt.EncryptionKey) != 32 {
+			return nil, nil, errors.New("encryption key must be 32 bytes")
+		}
+		var key [32]byte
+		copy(key[:], opt.EncryptionKey)
+		encData, err := core.NewEncryptedData(data, key)
+		if err != nil {
+			return nil, nil, errors.WithMessage(err, "Failed to create encrypted data")
+		}
+		data = encData
+		uploader.logger.Info("Data encryption enabled (pre-split)")
+
+		// Clear encryption key to prevent double encryption in Upload/BatchUpload
+		opt.EncryptionKey = nil
+	}
+
 	txHashes := make([]common.Hash, 0)
 	rootHashes := make([]common.Hash, 0)
 	if data.Size() <= fragmentSize {
-		txHash, rootHash, err := uploader.Upload(ctx, data, option...)
+		txHash, rootHash, err := uploader.Upload(ctx, data, opt)
 		if err != nil {
 			return txHashes, rootHashes, err
 		}
@@ -176,10 +201,6 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 	} else {
 		fragments := data.Split(fragmentSize)
 		uploader.logger.Infof("splitted origin file into %v fragments, %v bytes each.", len(fragments), fragmentSize)
-		var opt UploadOption
-		if len(option) > 0 {
-			opt = option[0]
-		}
 		for l := 0; l < len(fragments); l += int(defaultBatchSize) {
 			r := min(l+int(defaultBatchSize), len(fragments))
 			uploader.logger.Infof("batch submitting fragments %v to %v...", l, r)

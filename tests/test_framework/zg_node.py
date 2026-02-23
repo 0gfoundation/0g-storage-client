@@ -100,8 +100,12 @@ class ZGNode(BlockchainNode):
         eth_http = arrange_port(PortCategory.ZG_ETH_HTTP, 0)
         eth_ws = arrange_port(PortCategory.ZG_ETH_WS, 0)
         consensus_rpc = arrange_port(PortCategory.ZG_CONSENSUS_RPC, 0)
-        self.log.info("Starting 0gchaind via Makefile [ETH_HTTP: %d, ETH_WS: %d, CONSENSUS_RPC: %d]",
-                      eth_http, eth_ws, consensus_rpc)
+        self.log.info(
+            "Starting 0gchaind via Makefile [ETH_HTTP: %d, ETH_WS: %d, CONSENSUS_RPC: %d]",
+            eth_http,
+            eth_ws,
+            consensus_rpc,
+        )
         ret = subprocess.run(
             args=_chain_make_args(self._root_dir, "start"),
             cwd=self._make_dir,
