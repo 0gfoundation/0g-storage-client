@@ -42,7 +42,7 @@ func LoadMetadata(file *os.File) (*Metadata, error) {
 		return nil, errors.Errorf("Read metadata length mismatch, expected = %v, actual = %v", MetadataSize, n)
 	}
 
-	metadata, err := DeserializeMedata(buf)
+	metadata, err := DeserializeMetadata(buf)
 	if err != nil {
 		return nil, errors.WithMessage(err, "Failed to deserialize metadata")
 	}
@@ -60,7 +60,7 @@ func (md *Metadata) Serialize() []byte {
 	return encoded
 }
 
-func DeserializeMedata(encoded []byte) (*Metadata, error) {
+func DeserializeMetadata(encoded []byte) (*Metadata, error) {
 	if len(encoded) != MetadataSize {
 		return nil, errors.Errorf("Invalid data length, expected = %v, actual = %v", MetadataSize, len(encoded))
 	}

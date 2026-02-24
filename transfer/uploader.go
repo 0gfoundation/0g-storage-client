@@ -451,7 +451,7 @@ func (uploader *Uploader) uploadSlowParallel(ctx context.Context, data core.Iter
 				cancelUpload()
 				return txHash, err
 			}
-			logrus.Info("File finalized on storage node")
+			uploader.logger.Info("File finalized on storage node")
 			return txHash, nil
 		case err := <-receiptCh:
 			if err != nil {
@@ -668,7 +668,11 @@ func (uploader *Uploader) waitForLogEntry(ctx context.Context, root common.Hash,
 	var info *node.FileInfo
 
 	for {
-		time.Sleep(time.Second)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
 
 		clients := append(uploader.clients.Trusted, uploader.clients.Discovered...)
 
@@ -717,7 +721,27 @@ func (uploader *Uploader) waitForLogEntry(ctx context.Context, root common.Hash,
 	return info, nil
 }
 
-func (uploader *Uploader) newSegmentUploaderWithRange(ctx context.Context, startSegmentIndex, endSegmentIndex uint64, txSeq uint64, useTxSeq bool, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) ([]*segmentUploader, error) {
+// segmentUploaderParams groups the parameters for creating segment uploaders.
+type segmentUploaderParams struct {
+	startSegmentIndex uint64
+	endSegmentIndex   uint64
+	txSeq             uint64
+	useTxSeq          bool
+	data              core.IterableData
+	tree              *merkle.Tree
+	expectedReplica   uint
+	taskSize          uint
+	method            string
+}
+
+// taskGenerator produces per-client upload tasks. It receives the client index,
+// the shard config for that client, and returns the tasks for that client.
+type taskGenerator func(clientIndex int, sc *shard.ShardConfig) []*uploadTask
+
+// buildSegmentUploaders is the shared scaffolding for creating segment uploaders.
+// It validates shards, skips finalized nodes, generates tasks via genTasks,
+// interleaves them, and returns uploaders for trusted + discovered nodes.
+func (uploader *Uploader) buildSegmentUploaders(ctx context.Context, p segmentUploaderParams, genTasks taskGenerator) ([]*segmentUploader, error) {
 	createUploader := func(clients []*node.ZgsClient) (*segmentUploader, error) {
 		if len(clients) == 0 {
 			return nil, nil
@@ -726,28 +750,19 @@ func (uploader *Uploader) newSegmentUploaderWithRange(ctx context.Context, start
 		if err != nil {
 			return nil, err
 		}
-		if !shard.CheckReplica(shardConfigs, expectedReplica, method) {
+		if !shard.CheckReplica(shardConfigs, p.expectedReplica, p.method) {
 			return nil, fmt.Errorf("selected nodes cannot cover all shards")
 		}
-		clientTasks := make([][]*uploadTask, 0)
-		for clientIndex, shardConfig := range shardConfigs {
+		clientTasks := make([][]*uploadTask, 0, len(clients))
+		for clientIndex, sc := range shardConfigs {
 			// skip finalized nodes
-			info, _ := clients[clientIndex].GetFileInfo(ctx, tree.Root(), true)
+			info, _ := clients[clientIndex].GetFileInfo(ctx, p.tree.Root(), true)
 			if info != nil && info.Finalized {
 				continue
 			}
-			// create upload tasks
-			// segIndex % NumShard = shardId (in flow)
-			segIndex := shardConfig.NextSegmentIndex(startSegmentIndex)
-			tasks := make([]*uploadTask, 0)
-			for ; segIndex <= endSegmentIndex; segIndex += shardConfig.NumShard * uint64(taskSize) {
-				tasks = append(tasks, &uploadTask{
-					clientIndex: clientIndex,
-					segIndex:    segIndex - startSegmentIndex,
-					numShard:    shardConfig.NumShard,
-				})
+			if tasks := genTasks(clientIndex, sc); len(tasks) > 0 {
+				clientTasks = append(clientTasks, tasks)
 			}
-			clientTasks = append(clientTasks, tasks)
 		}
 		sort.SliceStable(clientTasks, func(i, j int) bool {
 			return len(clientTasks[i]) > len(clientTasks[j])
@@ -762,13 +777,13 @@ func (uploader *Uploader) newSegmentUploaderWithRange(ctx context.Context, start
 		}
 
 		return &segmentUploader{
-			data:     data,
-			tree:     tree,
-			txSeq:    txSeq,
-			useTxSeq: useTxSeq,
+			data:     p.data,
+			tree:     p.tree,
+			txSeq:    p.txSeq,
+			useTxSeq: p.useTxSeq,
 			clients:  clients,
 			tasks:    tasks,
-			taskSize: taskSize,
+			taskSize: p.taskSize,
 			logger:   uploader.logger,
 		}, nil
 	}
@@ -780,78 +795,69 @@ func (uploader *Uploader) newSegmentUploaderWithRange(ctx context.Context, start
 	discoveredUploader, err := createUploader(uploader.clients.Discovered)
 
 	return []*segmentUploader{trustedUploader, discoveredUploader}, err
+}
+
+// newSegmentUploaderWithRange creates shard-aware segment uploaders.
+// Each client uploads segments matching its shard, with stride numShard * taskSize.
+func (uploader *Uploader) newSegmentUploaderWithRange(ctx context.Context, p segmentUploaderParams) ([]*segmentUploader, error) {
+	return uploader.buildSegmentUploaders(ctx, p, func(clientIndex int, sc *shard.ShardConfig) []*uploadTask {
+		segIndex := sc.NextSegmentIndex(p.startSegmentIndex)
+		tasks := make([]*uploadTask, 0)
+		for ; segIndex <= p.endSegmentIndex; segIndex += sc.NumShard * uint64(p.taskSize) {
+			tasks = append(tasks, &uploadTask{
+				clientIndex: clientIndex,
+				segIndex:    segIndex - p.startSegmentIndex,
+				numShard:    sc.NumShard,
+			})
+		}
+		return tasks
+	})
 }
 
 func (uploader *Uploader) newSegmentUploader(ctx context.Context, info *node.FileInfo, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) ([]*segmentUploader, error) {
 	startSegmentIndex, endSegmentIndex := core.SegmentRange(info.Tx.StartEntryIndex, info.Tx.Size)
-	return uploader.newSegmentUploaderWithRange(ctx, startSegmentIndex, endSegmentIndex, info.Tx.Seq, true, data, tree, expectedReplica, taskSize, method)
+	return uploader.newSegmentUploaderWithRange(ctx, segmentUploaderParams{
+		startSegmentIndex: startSegmentIndex,
+		endSegmentIndex:   endSegmentIndex,
+		txSeq:             info.Tx.Seq,
+		useTxSeq:          true,
+		data:              data,
+		tree:              tree,
+		expectedReplica:   expectedReplica,
+		taskSize:          taskSize,
+		method:            method,
+	})
+}
+
+// newBroadcastSegmentUploader creates broadcast segment uploaders.
+// Every client uploads ALL segments (numShard=1), with stride taskSize.
+func (uploader *Uploader) newBroadcastSegmentUploader(ctx context.Context, p segmentUploaderParams) ([]*segmentUploader, error) {
+	return uploader.buildSegmentUploaders(ctx, p, func(clientIndex int, sc *shard.ShardConfig) []*uploadTask {
+		tasks := make([]*uploadTask, 0)
+		for segIndex := p.startSegmentIndex; segIndex <= p.endSegmentIndex; segIndex += uint64(p.taskSize) {
+			tasks = append(tasks, &uploadTask{
+				clientIndex: clientIndex,
+				segIndex:    segIndex - p.startSegmentIndex,
+				numShard:    1,
+			})
+		}
+		return tasks
+	})
 }
 
 func (uploader *Uploader) newSegmentUploaderByRoot(ctx context.Context, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) ([]*segmentUploader, error) {
 	startSegmentIndex, endSegmentIndex := core.SegmentRange(0, uint64(data.Size()))
-	return uploader.newBroadcastSegmentUploader(ctx, startSegmentIndex, endSegmentIndex, 0, false, data, tree, expectedReplica, taskSize, method)
-}
-
-func (uploader *Uploader) newBroadcastSegmentUploader(ctx context.Context, startSegmentIndex, endSegmentIndex uint64, txSeq uint64, useTxSeq bool, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) ([]*segmentUploader, error) {
-	createUploader := func(clients []*node.ZgsClient) (*segmentUploader, error) {
-		if len(clients) == 0 {
-			return nil, nil
-		}
-		shardConfigs, err := getShardConfigs(clients)
-		if err != nil {
-			return nil, err
-		}
-		if !shard.CheckReplica(shardConfigs, expectedReplica, method) {
-			return nil, fmt.Errorf("selected nodes cannot cover all shards")
-		}
-		clientTasks := make([][]*uploadTask, 0, len(clients))
-		for clientIndex := range clients {
-			// skip finalized nodes
-			info, _ := clients[clientIndex].GetFileInfo(ctx, tree.Root(), true)
-			if info != nil && info.Finalized {
-				continue
-			}
-			tasks := make([]*uploadTask, 0)
-			for segIndex := startSegmentIndex; segIndex <= endSegmentIndex; segIndex += uint64(taskSize) {
-				tasks = append(tasks, &uploadTask{
-					clientIndex: clientIndex,
-					segIndex:    segIndex - startSegmentIndex,
-					numShard:    1,
-				})
-			}
-			clientTasks = append(clientTasks, tasks)
-		}
-		sort.SliceStable(clientTasks, func(i, j int) bool {
-			return len(clientTasks[i]) > len(clientTasks[j])
-		})
-		tasks := make([]*uploadTask, 0)
-		if len(clientTasks) > 0 {
-			for taskIndex := 0; taskIndex < len(clientTasks[0]); taskIndex += 1 {
-				for i := 0; i < len(clientTasks) && taskIndex < len(clientTasks[i]); i += 1 {
-					tasks = append(tasks, clientTasks[i][taskIndex])
-				}
-			}
-		}
-
-		return &segmentUploader{
-			data:     data,
-			tree:     tree,
-			txSeq:    txSeq,
-			useTxSeq: useTxSeq,
-			clients:  clients,
-			tasks:    tasks,
-			taskSize: taskSize,
-			logger:   uploader.logger,
-		}, nil
-	}
-
-	trustedUploader, err := createUploader(uploader.clients.Trusted)
-	if err != nil {
-		return nil, err
-	}
-	discoveredUploader, err := createUploader(uploader.clients.Discovered)
-
-	return []*segmentUploader{trustedUploader, discoveredUploader}, err
+	return uploader.newBroadcastSegmentUploader(ctx, segmentUploaderParams{
+		startSegmentIndex: startSegmentIndex,
+		endSegmentIndex:   endSegmentIndex,
+		txSeq:             0,
+		useTxSeq:          false,
+		data:              data,
+		tree:              tree,
+		expectedReplica:   expectedReplica,
+		taskSize:          taskSize,
+		method:            method,
+	})
 }
 
 func (uploader *Uploader) uploadFile(ctx context.Context, info *node.FileInfo, data core.IterableData, tree *merkle.Tree, expectedReplica, taskSize uint, method string) error {
@@ -882,7 +888,7 @@ func (uploader *Uploader) uploadFile(ctx context.Context, info *node.FileInfo, d
 	}
 
 	if segmentUploader[1] != nil {
-		logrus.Infof("Uploading to %d discovered nodes", len(segmentUploader[1].clients))
+		uploader.logger.Infof("Uploading to %d discovered nodes", len(segmentUploader[1].clients))
 		err = parallel.Serial(ctx, segmentUploader[1], len(segmentUploader[1].tasks), opt)
 		if err != nil {
 			return errors.Errorf("Discovered nodes upload error: %v", err)
@@ -931,7 +937,7 @@ func (uploader *Uploader) uploadFileByRoot(ctx context.Context, data core.Iterab
 	}
 
 	if segmentUploader[1] != nil {
-		logrus.Infof("Uploading to %d discovered nodes", len(segmentUploader[1].clients))
+		uploader.logger.Infof("Uploading to %d discovered nodes", len(segmentUploader[1].clients))
 		err = parallel.Serial(ctx, segmentUploader[1], len(segmentUploader[1].tasks), opt)
 		if err != nil {
 			return errors.Errorf("Discovered nodes upload error: %v", err)
