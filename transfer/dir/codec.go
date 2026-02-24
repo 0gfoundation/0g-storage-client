@@ -16,7 +16,8 @@ var (
 	_ encoding.BinaryMarshaler   = (*FsNode)(nil)
 	_ encoding.BinaryUnmarshaler = (*FsNode)(nil)
 
-	CodecVersion    = uint16(1)
+	CodecVersion    = uint16(2)
+	CodecVersionV1  = uint16(1)
 	CodecMagicBytes = crypto.Keccak256([]byte("0g-storage-client-dir-codec"))
 )
 
@@ -76,8 +77,8 @@ func (node *FsNode) UnmarshalBinary(data []byte) error {
 		return errors.New("not enough data to read codec version")
 	}
 	version := binary.BigEndian.Uint16(data[:2])
-	if version != CodecVersion {
-		return errors.Errorf("unsupported codec version: got %d, expected %d", version, CodecVersion)
+	if version != CodecVersion && version != CodecVersionV1 {
+		return errors.Errorf("unsupported codec version: got %d, expected %d or %d", version, CodecVersionV1, CodecVersion)
 	}
 	data = data[2:]
 
@@ -85,5 +86,11 @@ func (node *FsNode) UnmarshalBinary(data []byte) error {
 	if err := json.Unmarshal(data, node); err != nil {
 		return errors.WithMessage(err, "failed to unmarshal `FsNode` from JSON")
 	}
+
+	// For v1 data, convert single Root field to Roots slice
+	if version == CodecVersionV1 {
+		node.normalizeRoots()
+	}
+
 	return nil
 }

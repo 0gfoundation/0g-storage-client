@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/0gfoundation/0g-storage-client/core"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/pkg/errors"
 )
 
@@ -25,7 +23,8 @@ const (
 type FsNode struct {
 	Name    string    `json:"name"`              // File or directory name
 	Type    FileType  `json:"type"`              // File type of the node
-	Root    string    `json:"hash,omitempty"`    // Merkle root hash (only for regular files)
+	Root    string    `json:"hash,omitempty"`    // Merkle root hash (v1 compat, single root; use Roots for v2)
+	Roots   []string  `json:"roots,omitempty"`   // Merkle root hashes (v2, supports split files)
 	Size    int64     `json:"size,omitempty"`    // File size in bytes (only for regular files)
 	Link    string    `json:"link,omitempty"`    // Symbolic link target (only for symbolic links)
 	Entries []*FsNode `json:"entries,omitempty"` // Directory entries (only for directories)
@@ -44,13 +43,13 @@ func NewDirFsNode(name string, entryNodes []*FsNode) *FsNode {
 	}
 }
 
-// NewFileFsNode creates a new FsNode representing a regular file.
-func NewFileFsNode(name string, rootHash common.Hash, size int64) *FsNode {
+// NewFileFsNode creates a new FsNode representing a regular file with known roots.
+func NewFileFsNode(name string, roots []string, size int64) *FsNode {
 	return &FsNode{
-		Name: name,
-		Type: FileTypeFile,
-		Root: rootHash.Hex(),
-		Size: size,
+		Name:  name,
+		Type:  FileTypeFile,
+		Roots: roots,
+		Size:  size,
 	}
 }
 
@@ -60,6 +59,18 @@ func NewSymbolicFsNode(name, link string) *FsNode {
 		Name: name,
 		Type: FileTypeSymbolic,
 		Link: link,
+	}
+}
+
+// normalizeRoots converts v1 metadata (single Root) to v2 format (Roots slice).
+// It recursively normalizes all entries in the tree.
+func (node *FsNode) normalizeRoots() {
+	if node.Type == FileTypeFile && len(node.Roots) == 0 && node.Root != "" {
+		node.Roots = []string{node.Root}
+		node.Root = ""
+	}
+	for _, entry := range node.Entries {
+		entry.normalizeRoots()
 	}
 }
 
@@ -83,7 +94,15 @@ func (node *FsNode) Equal(rhs *FsNode) bool {
 
 	switch node.Type {
 	case FileTypeFile:
-		return node.Root == rhs.Root
+		if len(node.Roots) != len(rhs.Roots) {
+			return false
+		}
+		for i := range node.Roots {
+			if node.Roots[i] != rhs.Roots[i] {
+				return false
+			}
+		}
+		return true
 	case FileTypeSymbolic:
 		return node.Link == rhs.Link
 	case FileTypeDirectory:
@@ -264,15 +283,8 @@ func buildSymbolicNode(path string, info os.FileInfo) (*FsNode, error) {
 	return NewSymbolicFsNode(info.Name(), link), nil
 }
 
-// buildFileNode creates an FsNode for a regular file, including its Merkle root hash.
+// buildFileNode creates an FsNode for a regular file.
+// Roots are left empty — they are populated later during upload (e.g. by UploadDir).
 func buildFileNode(path string, info os.FileInfo) (*FsNode, error) {
-	if info.Size() == 0 {
-		return NewFileFsNode(info.Name(), common.Hash{}, 0), nil
-	}
-
-	hash, err := core.MerkleRoot(path)
-	if err != nil {
-		return nil, errors.WithMessagef(err, "failed to calculate merkle root for %s", path)
-	}
-	return NewFileFsNode(info.Name(), hash, info.Size()), nil
+	return NewFileFsNode(info.Name(), nil, info.Size()), nil
 }

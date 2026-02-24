@@ -27,7 +27,20 @@ type BatchUploadOption struct {
 	Method      string         // method for selecting nodes, can be "max", "random" or certain positive number in string
 	FullTrusted bool           // whether to use full trusted nodes
 	DataOptions []UploadOption // upload option for single file, nonce and fee are ignored
-	FastMode    bool           // skip waiting for receipt and upload segments by root (recommended for small files)
+}
+
+// normalizeBatchUploadOption applies safe defaults to a BatchUploadOption.
+// n is the number of data items in the batch.
+func normalizeBatchUploadOption(opts *BatchUploadOption, n int) {
+	if opts.Method == "" {
+		opts.Method = "random"
+	}
+	if opts.TaskSize == 0 {
+		opts.TaskSize = 1
+	}
+	for i := range opts.DataOptions {
+		normalizeUploadOption(&opts.DataOptions[i])
+	}
 }
 
 // BatchUpload submit multiple data to 0g storage contract batchly in single on-chain transaction, then transfer the data to the storage nodes.
@@ -47,7 +60,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 			Fee:         nil,
 			Nonce:       nil,
 			DataOptions: make([]UploadOption, n),
-			Method:      "min",
+			Method:      "random",
 			FullTrusted: true,
 		}
 	}
@@ -58,7 +71,7 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 		}
 		opts.Submitter = submitter
 	}
-	opts.TaskSize = max(opts.TaskSize, 1)
+	normalizeBatchUploadOption(&opts, n)
 	if len(opts.DataOptions) != n {
 		return common.Hash{}, nil, errors.New("datas and tags length mismatch")
 	}
@@ -132,7 +145,9 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 	rootSeqMap := make(map[common.Hash]uint64)
 
 	if len(toSubmitDatas) > 0 {
-		waitReceipt := !opts.FastMode
+		// Batch upload always waits for receipt: it's one tx for all data, so
+		// we need the receipt to map each data root to its txSeq.
+		waitReceipt := true
 		receiptFlag := waitReceipt
 		submitOpt := SubmitLogEntryOption{
 			Submitter:   opts.Submitter,
@@ -181,19 +196,6 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 		go func(i int) {
 			defer wg.Done()
 			info := fileInfos[i]
-			fastMode := opts.FastMode && datas[i].Size() <= fastUploadMaxSize
-			if opts.FastMode && !fastMode {
-				uploader.logger.WithField("size", datas[i].Size()).Info("Fast mode disabled for data size over limit")
-			}
-
-			if fastMode && info == nil {
-				if err := uploader.uploadFileByRoot(ctx, datas[i], trees[i], opts.DataOptions[i].ExpectedReplica, opts.DataOptions[i].TaskSize, opts.DataOptions[i].Method); err != nil {
-					errs <- errors.WithMessage(err, "Failed to upload file")
-					return
-				}
-				errs <- nil
-				return
-			}
 
 			if info == nil {
 				var err error
@@ -210,12 +212,10 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 				return
 			}
 
-			if !fastMode {
-				// Wait for transaction finality
-				if _, err := uploader.waitForLogEntry(ctx, trees[i].Root(), opts.DataOptions[i].FinalityRequired, info.Tx.Seq, true); err != nil {
-					errs <- errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
-					return
-				}
+			// Wait for transaction finality
+			if _, err := uploader.waitForLogEntry(ctx, trees[i].Root(), opts.DataOptions[i].FinalityRequired, info.Tx.Seq, true); err != nil {
+				errs <- errors.WithMessage(err, "Failed to wait for transaction finality on storage node")
+				return
 			}
 			errs <- nil
 		}(i)

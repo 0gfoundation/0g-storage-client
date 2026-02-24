@@ -107,7 +107,74 @@ func (ed *EncryptedData) Read(buf []byte, offset int64) (int, error) {
 	return written, nil
 }
 
-// Split returns the encrypted data as a single fragment (splitting is not supported for encrypted data).
+// Split splits the encrypted data stream into fragments of the given size.
+// Each fragment is an EncryptedDataFragment providing a view into this encrypted stream.
+// If the encrypted data fits within fragmentSize, returns the EncryptedData itself.
 func (ed *EncryptedData) Split(fragmentSize int64) []IterableData {
-	return []IterableData{ed}
+	if ed.encryptedSize <= fragmentSize {
+		return []IterableData{ed}
+	}
+
+	fragments := make([]IterableData, 0)
+	for offset := int64(0); offset < ed.encryptedSize; offset += fragmentSize {
+		size := min(ed.encryptedSize-offset, fragmentSize)
+		fragment := &EncryptedDataFragment{
+			parent:     ed,
+			offset:     offset,
+			size:       size,
+			paddedSize: IteratorPaddedSize(size, true),
+		}
+		fragments = append(fragments, fragment)
+	}
+	return fragments
+}
+
+// EncryptedDataFragment represents a contiguous view (fragment) of an EncryptedData stream.
+// It delegates Read calls to the parent EncryptedData with an appropriate offset adjustment.
+// This follows the same offset/size view pattern as File.Split() and DataInMemory.Split().
+type EncryptedDataFragment struct {
+	parent     *EncryptedData
+	offset     int64  // byte offset within the parent's encrypted stream
+	size       int64  // logical size of this fragment
+	paddedSize uint64 // padded size for flow submission
+}
+
+var _ IterableData = (*EncryptedDataFragment)(nil)
+
+func (f *EncryptedDataFragment) NumChunks() uint64 {
+	return NumSplits(f.size, DefaultChunkSize)
+}
+
+func (f *EncryptedDataFragment) NumSegments() uint64 {
+	return NumSplits(f.size, DefaultSegmentSize)
+}
+
+func (f *EncryptedDataFragment) Size() int64 {
+	return f.size
+}
+
+func (f *EncryptedDataFragment) PaddedSize() uint64 {
+	return f.paddedSize
+}
+
+func (f *EncryptedDataFragment) Offset() int64 {
+	return f.offset
+}
+
+// Read reads from this fragment at the given offset.
+// Delegates to the parent EncryptedData with the fragment's base offset added.
+func (f *EncryptedDataFragment) Read(buf []byte, offset int64) (int, error) {
+	remaining := f.size - offset
+	if remaining <= 0 {
+		return 0, nil
+	}
+	if int64(len(buf)) > remaining {
+		buf = buf[:remaining]
+	}
+	return f.parent.Read(buf, f.offset+offset)
+}
+
+// Split returns the fragment itself (fragments are not further splittable).
+func (f *EncryptedDataFragment) Split(fragmentSize int64) []IterableData {
+	return []IterableData{f}
 }

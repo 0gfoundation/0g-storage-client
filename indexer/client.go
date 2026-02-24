@@ -29,8 +29,9 @@ var (
 // Client indexer client
 type Client struct {
 	*rpc.Client
-	option IndexerClientOption
-	logger *logrus.Logger
+	option        IndexerClientOption
+	logger        *logrus.Logger
+	encryptionKey []byte // optional 32-byte AES-256 decryption key
 }
 
 // IndexerClientOption indexer client option
@@ -304,7 +305,21 @@ func (c *Client) NewDownloaderFromIndexerNodes(ctx context.Context, root string)
 	return downloader, nil
 }
 
+// WithEncryptionKey sets the encryption key for post-download decryption.
+// The key must be exactly 32 bytes (AES-256).
+func (c *Client) WithEncryptionKey(key []byte) *Client {
+	c.encryptionKey = key
+	return c
+}
+
 func (c *Client) DownloadFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
+	if len(c.encryptionKey) > 0 {
+		return c.downloadEncryptedFragments(ctx, roots, filename, withProof)
+	}
+	return c.downloadPlainFragments(ctx, roots, filename, withProof)
+}
+
+func (c *Client) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
 	outFile, err := os.Create(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
@@ -340,11 +355,75 @@ func (c *Client) DownloadFragments(ctx context.Context, roots []string, filename
 	return nil
 }
 
+// downloadEncryptedFragments downloads fragments raw (without decryption),
+// extracts the encryption header from fragment 0, then decrypts each fragment
+// with proper CTR offset tracking and writes decrypted data to the output file.
+func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
+	if len(c.encryptionKey) != 32 {
+		return errors.New("encryption key must be 32 bytes")
+	}
+	var key [32]byte
+	copy(key[:], c.encryptionKey)
+
+	outFile, err := os.Create(filename)
+	if err != nil {
+		return errors.WithMessage(err, "failed to create output file")
+	}
+	defer outFile.Close()
+
+	var header *core.EncryptionHeader
+	var cumulativeDataOffset uint64
+
+	for i, root := range roots {
+		tempFile := fmt.Sprintf("%v.temp", root)
+
+		// Download raw (no encryption key on the per-root downloader)
+		downloader, err := c.NewDownloaderFromIndexerNodes(ctx, root)
+		if err != nil {
+			return err
+		}
+		err = downloader.Download(ctx, root, tempFile, withProof)
+		if err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("Failed to download fragment %d", i))
+		}
+
+		fragmentData, err := os.ReadFile(tempFile)
+		if err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("failed to read fragment %d", i))
+		}
+		os.Remove(tempFile)
+
+		if i == 0 {
+			// First fragment: extract header
+			header, err = core.ParseEncryptionHeader(fragmentData)
+			if err != nil {
+				return errors.WithMessage(err, "Failed to parse encryption header from fragment 0")
+			}
+		}
+
+		plaintext, newOffset, err := core.DecryptFragmentData(&key, header, fragmentData, i == 0, cumulativeDataOffset)
+		if err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("Failed to decrypt fragment %d", i))
+		}
+		cumulativeDataOffset = newOffset
+
+		if _, err := outFile.Write(plaintext); err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("failed to write decrypted fragment %d", i))
+		}
+	}
+
+	c.logger.Info("Succeeded to decrypt and concatenate encrypted fragments")
+	return nil
+}
+
 // Download download file by given data root
 func (c *Client) Download(ctx context.Context, root, filename string, withProof bool) error {
 	downloader, err := c.NewDownloaderFromIndexerNodes(ctx, root)
 	if err != nil {
 		return err
+	}
+	if len(c.encryptionKey) > 0 {
+		downloader.WithEncryptionKey(c.encryptionKey)
 	}
 	return downloader.Download(ctx, root, filename, withProof)
 }

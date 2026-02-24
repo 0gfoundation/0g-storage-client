@@ -454,7 +454,9 @@ class ClientTestFramework(TestFramework):
             indexer_args.append(discover_node)
 
         indexer_port = arrange_port(PortCategory.ZGS_INDEXER_RPC, 0)
-        self.log.info("start indexer [RPC: %d] with args: %s", indexer_port, indexer_args)
+        self.log.info(
+            "start indexer [RPC: %d] with args: %s", indexer_port, indexer_args
+        )
         data_dir = os.path.join(self.root_dir, "indexer0")
         os.mkdir(data_dir)
         stdout = tempfile.NamedTemporaryFile(
@@ -519,7 +521,10 @@ class ClientTestFramework(TestFramework):
 
         # Calculate and log port range
         port_max = self.options.port_min + PORT_RANGE
-        print(f"[PORT INFO] Test assigned port range: {self.options.port_min}-{port_max-1} (range size: {PORT_RANGE})", flush=True)
+        print(
+            f"[PORT INFO] Test assigned port range: {self.options.port_min}-{port_max-1} (range size: {PORT_RANGE})",
+            flush=True,
+        )
 
         # Set up temp directory and start logging
         if self.options.tmpdir:

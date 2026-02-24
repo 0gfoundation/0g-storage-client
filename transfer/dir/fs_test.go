@@ -6,15 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/transfer/dir"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewDirFsNode(t *testing.T) {
-	child1 := &dir.FsNode{Name: "child1", Root: "0x01"}
-	child2 := &dir.FsNode{Name: "child2", Root: "0x02"}
+	child1 := &dir.FsNode{Name: "child1", Roots: []string{"0x01"}}
+	child2 := &dir.FsNode{Name: "child2", Roots: []string{"0x02"}}
 	children := []*dir.FsNode{child1, child2}
 
 	node := dir.NewDirFsNode("root", children)
@@ -27,12 +25,12 @@ func TestNewDirFsNode(t *testing.T) {
 }
 
 func TestNewFileFsNode(t *testing.T) {
-	hash := common.HexToHash("0x12345")
-	node := dir.NewFileFsNode("file.txt", hash, 1024)
+	roots := []string{"0x12345"}
+	node := dir.NewFileFsNode("file.txt", roots, 1024)
 
 	assert.Equal(t, "file.txt", node.Name)
 	assert.Equal(t, dir.FileTypeFile, node.Type)
-	assert.Equal(t, hash.Hex(), node.Root)
+	assert.Equal(t, roots, node.Roots)
 	assert.Equal(t, int64(1024), node.Size)
 }
 
@@ -70,14 +68,14 @@ func TestFsNodeEqual(t *testing.T) {
 	}{
 		{
 			name:     "Equal Files",
-			node1:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Root: "0xabc123", Size: 100},
-			node2:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Root: "0xabc123", Size: 100},
+			node1:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xabc123"}, Size: 100},
+			node2:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xabc123"}, Size: 100},
 			expected: true,
 		},
 		{
 			name:     "Different File Hash",
-			node1:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Root: "0xabc123", Size: 100},
-			node2:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Root: "0xdef456", Size: 100},
+			node1:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xabc123"}, Size: 100},
+			node2:    &dir.FsNode{Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xdef456"}, Size: 100},
 			expected: false,
 		},
 		{
@@ -102,13 +100,13 @@ func TestFsNodeEqual(t *testing.T) {
 			name: "Equal Directories with Same Entries",
 			node1: &dir.FsNode{
 				Type: dir.FileTypeDirectory, Name: "dir1", Entries: []*dir.FsNode{
-					{Type: dir.FileTypeFile, Name: "file1", Root: "0xabc123", Size: 100},
+					{Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xabc123"}, Size: 100},
 					{Type: dir.FileTypeSymbolic, Name: "link1", Link: "/path/to/target"},
 				},
 			},
 			node2: &dir.FsNode{
 				Type: dir.FileTypeDirectory, Name: "dir1", Entries: []*dir.FsNode{
-					{Type: dir.FileTypeFile, Name: "file1", Root: "0xabc123", Size: 100},
+					{Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xabc123"}, Size: 100},
 					{Type: dir.FileTypeSymbolic, Name: "link1", Link: "/path/to/target"},
 				},
 			},
@@ -118,12 +116,12 @@ func TestFsNodeEqual(t *testing.T) {
 			name: "Different Directories with Different Entries",
 			node1: &dir.FsNode{
 				Type: dir.FileTypeDirectory, Name: "dir1", Entries: []*dir.FsNode{
-					{Type: dir.FileTypeFile, Name: "file1", Root: "0xabc123", Size: 100},
+					{Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xabc123"}, Size: 100},
 				},
 			},
 			node2: &dir.FsNode{
 				Type: dir.FileTypeDirectory, Name: "dir1", Entries: []*dir.FsNode{
-					{Type: dir.FileTypeFile, Name: "file2", Root: "0xdef456", Size: 100},
+					{Type: dir.FileTypeFile, Name: "file2", Roots: []string{"0xdef456"}, Size: 100},
 				},
 			},
 			expected: false,
@@ -131,7 +129,7 @@ func TestFsNodeEqual(t *testing.T) {
 		{
 			name: "Different Node Types",
 			node1: &dir.FsNode{
-				Type: dir.FileTypeFile, Name: "file1", Root: "0xabc123", Size: 100},
+				Type: dir.FileTypeFile, Name: "file1", Roots: []string{"0xabc123"}, Size: 100},
 			node2: &dir.FsNode{
 				Type: dir.FileTypeDirectory, Name: "file1", Entries: []*dir.FsNode{}},
 			expected: false,
@@ -195,10 +193,10 @@ func TestBuildFileTree(t *testing.T) {
 	t.Run("test file node", func(t *testing.T) {
 		node, found := root.Search("testfile.txt")
 		assert.True(t, found)
-		// Calculate expected hash using core.MerkleRoot
-		expectedHash, err := core.MerkleRoot(filePath)
-		assert.NoError(t, err)
-		assert.Equal(t, expectedHash.Hex(), node.Root)
+		assert.Equal(t, dir.FileTypeFile, node.Type)
+		assert.Equal(t, int64(len("content")), node.Size)
+		// Roots are empty — populated later during upload
+		assert.Nil(t, node.Roots)
 	})
 
 	t.Run("test symbolic link node", func(t *testing.T) {

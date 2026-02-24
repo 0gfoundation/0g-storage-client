@@ -64,6 +64,13 @@ func (downloader *Downloader) WithEncryptionKey(key []byte) *Downloader {
 }
 
 func (downloader *Downloader) DownloadFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
+	if len(downloader.encryptionKey) > 0 {
+		return downloader.downloadEncryptedFragments(ctx, roots, filename, withProof)
+	}
+	return downloader.downloadPlainFragments(ctx, roots, filename, withProof)
+}
+
+func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
 	outFile, err := os.Create(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
@@ -95,34 +102,95 @@ func (downloader *Downloader) DownloadFragments(ctx context.Context, roots []str
 	return nil
 }
 
-// Download download data from storage nodes.
-func (downloader *Downloader) Download(ctx context.Context, root, filename string, withProof bool) error {
+// downloadEncryptedFragments downloads fragments raw (without decryption),
+// extracts the encryption header from fragment 0, then decrypts each fragment
+// with proper CTR offset tracking and writes decrypted data to the output file.
+func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
+	if len(downloader.encryptionKey) != 32 {
+		return errors.New("encryption key must be 32 bytes")
+	}
+	var key [32]byte
+	copy(key[:], downloader.encryptionKey)
+
+	outFile, err := os.Create(filename)
+	if err != nil {
+		return errors.WithMessage(err, "failed to create output file")
+	}
+	defer outFile.Close()
+
+	var header *core.EncryptionHeader
+	var cumulativeDataOffset uint64
+
+	for i, root := range roots {
+		tempFile := fmt.Sprintf("%v.temp", root)
+
+		// Download raw (without decryption)
+		if err := downloader.downloadAndValidate(ctx, root, tempFile, withProof); err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("Failed to download fragment %d", i))
+		}
+
+		fragmentData, err := os.ReadFile(tempFile)
+		if err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("failed to read fragment %d", i))
+		}
+		os.Remove(tempFile)
+
+		if i == 0 {
+			// First fragment: extract header
+			header, err = core.ParseEncryptionHeader(fragmentData)
+			if err != nil {
+				return errors.WithMessage(err, "Failed to parse encryption header from fragment 0")
+			}
+		}
+
+		plaintext, newOffset, err := core.DecryptFragmentData(&key, header, fragmentData, i == 0, cumulativeDataOffset)
+		if err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("Failed to decrypt fragment %d", i))
+		}
+		cumulativeDataOffset = newOffset
+
+		if _, err := outFile.Write(plaintext); err != nil {
+			return errors.WithMessage(err, fmt.Sprintf("failed to write decrypted fragment %d", i))
+		}
+	}
+
+	downloader.logger.Info("Succeeded to decrypt and concatenate encrypted fragments")
+	return nil
+}
+
+// downloadAndValidate downloads and validates a file without decryption.
+func (downloader *Downloader) downloadAndValidate(ctx context.Context, root, filename string, withProof bool) error {
 	hash := common.HexToHash(root)
 
-	// Query file info from storage node
 	info, err := downloader.queryFile(ctx, hash)
 	if err != nil {
 		return errors.WithMessage(err, "Failed to query file info")
 	}
 
-	// Check file existence before downloading
 	if err = downloader.checkExistence(filename, hash); err != nil {
 		return errors.WithMessage(err, "Failed to check file existence")
 	}
 
-	// Download segments
 	if err = downloader.downloadFile(ctx, filename, hash, info, withProof); err != nil {
 		return errors.WithMessage(err, "Failed to download file")
 	}
 
-	// Validate the downloaded file
 	if err = downloader.validateDownloadFile(root, filename, int64(info.Tx.Size)); err != nil {
 		return errors.WithMessage(err, "Failed to validate downloaded file")
 	}
 
+	return nil
+}
+
+// Download download data from storage nodes.
+func (downloader *Downloader) Download(ctx context.Context, root, filename string, withProof bool) error {
+	if err := downloader.downloadAndValidate(ctx, root, filename, withProof); err != nil {
+		return err
+	}
+
 	// Decrypt the file if an encryption key is set
 	if len(downloader.encryptionKey) > 0 {
-		if err = downloader.decryptDownloadedFile(filename); err != nil {
+		if err := downloader.decryptDownloadedFile(filename); err != nil {
 			return errors.WithMessage(err, "Failed to decrypt downloaded file")
 		}
 	}

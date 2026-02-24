@@ -14,7 +14,7 @@ Following packages can help applications to integrate with 0g storage network:
 - **[core](core)**: provides underlying utilities to build merkle tree for files or iterable data, defines data padding standard to interact with [Flow contract](contract/contract.go), and implements client-side AES-256-CTR encryption for file uploads.
 - **[node](node)**: defines RPC client structures to facilitate RPC interactions with 0g storage nodes and 0g key-value (KV) nodes.
 - **[kv](kv)**: defines structures to interact with 0g storage kv, with optional stream data encryption via `UploadOption.EncryptionKey`.
-- **[transfer](transfer)**: defines data structures and functions for transferring data between local and 0g storage, including encrypted upload/download support via `UploadOption.EncryptionKey` and `Downloader.WithEncryptionKey`.
+- **[transfer](transfer)**: defines data structures and functions for transferring data between local and 0g storage, including encrypted upload/download support via `UploadOption.EncryptionKey` and `Downloader.WithEncryptionKey`. SDK callers can pass a zero-valued `UploadOption`; safe defaults are applied automatically (e.g. `Method` defaults to `"random"`, `Tags` defaults to empty bytes).
 - **[indexer](indexer)**: select storage nodes to upload data from indexer which maintains trusted node list. Besides, allow clients to download files via HTTP GET requests.
 
 ## CLI
@@ -68,6 +68,14 @@ Encrypt files client-side using AES-256-CTR before uploading. The encryption key
 
 If you want to verify the **merkle proof** of downloaded segment, please specify `--proof` option.
 
+**Encrypted upload with fragment splitting**
+
+Encryption works with `--fragment-size` for large files. The file is encrypted first, then split into fragments:
+
+```
+./0g-storage-client upload --url <blockchain_rpc_endpoint> --key <private_key> --indexer <storage_indexer_endpoint> --file <file_path> --encryption-key <0x_hex_encoded_32_byte_key> --fragment-size <size_in_bytes>
+```
+
 **Download with decryption**
 
 To download and decrypt a file that was uploaded with an encryption key:
@@ -77,6 +85,14 @@ To download and decrypt a file that was uploaded with an encryption key:
 ```
 
 The encryption key must match the one used during upload.
+
+**Download encrypted fragments**
+
+To download and decrypt a file that was uploaded with both encryption and fragment splitting:
+
+```
+./0g-storage-client download --indexer <storage_indexer_endpoint> --roots <comma_separated_root_hashes> --file <output_file_path> --encryption-key <0x_hex_encoded_32_byte_key>
+```
 
 **Write to KV**
 
