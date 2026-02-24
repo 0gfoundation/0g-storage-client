@@ -39,6 +39,16 @@ func newStreamDataBuilder(version uint64) *streamDataBuilder {
 	}
 }
 
+// compareStreamKey orders entries by (StreamId, Key) lexicographically.
+func compareStreamKey(idA common.Hash, keyA []byte, idB common.Hash, keyB []byte) bool {
+	hexA := idA.Hex()
+	hexB := idB.Hex()
+	if hexA == hexB {
+		return hexutil.Encode(keyA) < hexutil.Encode(keyB)
+	}
+	return hexA < hexB
+}
+
 // Build serialize all cached KV operations to StreamData.
 func (builder *streamDataBuilder) Build(sorted ...bool) (*StreamData, error) {
 	var err error
@@ -97,22 +107,10 @@ func (builder *streamDataBuilder) Build(sorted ...bool) (*StreamData, error) {
 	if len(sorted) > 0 {
 		if sorted[0] {
 			sort.SliceStable(data.Reads, func(i, j int) bool {
-				streamIdI := data.Reads[i].StreamId.Hex()
-				streamIdJ := data.Reads[j].StreamId.Hex()
-				if streamIdI == streamIdJ {
-					return hexutil.Encode(data.Reads[i].Key) < hexutil.Encode(data.Reads[j].Key)
-				} else {
-					return streamIdI < streamIdJ
-				}
+				return compareStreamKey(data.Reads[i].StreamId, data.Reads[i].Key, data.Reads[j].StreamId, data.Reads[j].Key)
 			})
 			sort.SliceStable(data.Writes, func(i, j int) bool {
-				streamIdI := data.Writes[i].StreamId.Hex()
-				streamIdJ := data.Writes[j].StreamId.Hex()
-				if streamIdI == streamIdJ {
-					return hexutil.Encode(data.Writes[i].Key) < hexutil.Encode(data.Writes[j].Key)
-				} else {
-					return streamIdI < streamIdJ
-				}
+				return compareStreamKey(data.Writes[i].StreamId, data.Writes[i].Key, data.Writes[j].StreamId, data.Writes[j].Key)
 			})
 		}
 	}

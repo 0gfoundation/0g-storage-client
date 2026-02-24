@@ -19,7 +19,7 @@ func TestMetadataSerde(t *testing.T) {
 
 	encoded := md.Serialize()
 
-	md2, err := DeserializeMedata(encoded)
+	md2, err := DeserializeMetadata(encoded)
 	assert.NoError(t, err)
 	assert.Equal(t, md, *md2)
 }

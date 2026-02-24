@@ -220,16 +220,16 @@ func TransactWithGasAdjustment(
 			}
 			tx, err := contract.FlowTransactor.contract.Transact(opts, method, params...)
 
-			var receipt *types.Receipt
 			if err == nil {
-				// Wait for successful execution
+				// Wait for successful execution in a separate goroutine.
+				// Use local variables to avoid racing with the outer loop's err.
 				go func() {
-					receipt, err = contract.WaitForReceipt(ctx, tx.Hash(), true, blockchain.RetryOption{NRetries: retryOpts.MaxNonGasRetries})
-					if err == nil {
-						receiptCh <- receipt
+					r, e := contract.WaitForReceipt(ctx, tx.Hash(), true, blockchain.RetryOption{NRetries: retryOpts.MaxNonGasRetries})
+					if e == nil {
+						receiptCh <- r
 						return
 					}
-					errCh <- err
+					errCh <- e
 				}()
 				// even if the receipt is received, this loop will continue until the context is canceled
 				time.Sleep(30 * time.Second)

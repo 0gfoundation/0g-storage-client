@@ -28,7 +28,7 @@ func (uploader *Uploader) UploadDir(ctx context.Context, folder string, fragment
 		return n.Type == dir.FileTypeFile && n.Size > 0
 	})
 
-	logrus.Infof("Total %d files to be uploaded", len(nodes))
+	uploader.logger.Infof("Total %d files to be uploaded", len(nodes))
 
 	// Upload each file via SplitableUpload (handles encryption + splitting).
 	for i := range nodes {
@@ -51,7 +51,7 @@ func (uploader *Uploader) UploadDir(ctx context.Context, folder string, fragment
 		}
 		nodes[i].Roots = rootStrs
 
-		logrus.WithFields(logrus.Fields{
+		uploader.logger.WithFields(logrus.Fields{
 			"roots": rootStrs,
 			"path":  path,
 		}).Info("File uploaded successfully")

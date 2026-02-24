@@ -58,12 +58,12 @@ func (proof *Proof) ValidateHash(root, contentHash common.Hash, position, numLea
 	}
 
 	// content hash mismatch
-	if contentHash.Hex() != proof.Lemma[0].Hex() {
+	if contentHash != proof.Lemma[0] {
 		return errProofContentMismatch
 	}
 
 	// root mismatch
-	if len(proof.Lemma) > 1 && root.Hex() != proof.Lemma[len(proof.Lemma)-1].Hex() {
+	if len(proof.Lemma) > 1 && root != proof.Lemma[len(proof.Lemma)-1] {
 		return errProofRootMismatch
 	}
 
@@ -109,5 +109,5 @@ func (proof *Proof) validateRoot() bool {
 		}
 	}
 
-	return hash.Hex() == proof.Lemma[len(proof.Lemma)-1].Hex()
+	return hash == proof.Lemma[len(proof.Lemma)-1]
 }

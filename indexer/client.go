@@ -184,28 +184,37 @@ func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, d
 
 // BatchUpload submit multiple data to 0g storage contract batchly in single on-chain transaction, then transfer the data to the storage nodes selected from indexer service.
 func (c *Client) BatchUpload(ctx context.Context, w3Client *web3go.Client, datas []core.IterableData, option ...transfer.BatchUploadOption) (eth_common.Hash, []eth_common.Hash, error) {
-	expectedReplica := uint(1)
+	var opts transfer.BatchUploadOption
 	if len(option) > 0 {
-		for _, opt := range option[0].DataOptions {
-			expectedReplica = max(expectedReplica, opt.ExpectedReplica)
-		}
+		opts = option[0]
+	}
+
+	expectedReplica := uint(1)
+	for _, opt := range opts.DataOptions {
+		expectedReplica = max(expectedReplica, opt.ExpectedReplica)
 	}
 	var maxSegNum uint64
 	for _, data := range datas {
 		maxSegNum = max(maxSegNum, data.NumSegments())
 	}
 	dropped := make([]string, 0)
+	maxRetry := 3
+	attempts := 0
 	for {
-		uploader, err := c.NewUploaderFromIndexerNodes(ctx, maxSegNum, w3Client, expectedReplica, dropped, option[0].Method, option[0].FullTrusted)
+		uploader, err := c.NewUploaderFromIndexerNodes(ctx, maxSegNum, w3Client, expectedReplica, dropped, opts.Method, opts.FullTrusted)
 		if err != nil {
 			return eth_common.Hash{}, nil, err
 		}
-		hash, roots, err := uploader.BatchUpload(ctx, datas, option...)
+		hash, roots, err := uploader.BatchUpload(ctx, datas, opts)
 		var rpcError *node.RPCError
 		if errors.As(err, &rpcError) {
 			dropped = append(dropped, rpcError.URL)
 			c.logger.Infof("dropped problematic node and retry: %v", rpcError.Error())
 		} else {
+			return hash, roots, err
+		}
+		attempts++
+		if attempts >= maxRetry {
 			return hash, roots, err
 		}
 	}
@@ -245,27 +254,35 @@ func (c *Client) UploadFileSegments(
 		return errors.New("segment data is empty")
 	}
 
-	expectedReplica := uint(1)
+	var opt transfer.UploadOption
 	if len(option) > 0 {
-		expectedReplica = max(expectedReplica, option[0].ExpectedReplica)
+		opt = option[0]
 	}
+
+	expectedReplica := max(uint(1), opt.ExpectedReplica)
 
 	numSeg := core.NumSplits(int64(fileSeg.FileInfo.Tx.Size), core.DefaultSegmentSize)
 	dropped := make([]string, 0)
+	maxRetry := 3
+	attempts := 0
 	for {
-		uploaders, err := c.NewFileSegmentUploaderFromIndexerNodes(ctx, numSeg, expectedReplica, dropped, option[0].Method, true)
+		uploaders, err := c.NewFileSegmentUploaderFromIndexerNodes(ctx, numSeg, expectedReplica, dropped, opt.Method, true)
 		if err != nil {
 			return err
 		}
 
 		var rpcError *node.RPCError
 		for _, uploader := range uploaders {
-			if err := uploader.Upload(ctx, fileSeg, option...); errors.As(err, &rpcError) {
+			if err := uploader.Upload(ctx, fileSeg, opt); errors.As(err, &rpcError) {
 				dropped = append(dropped, rpcError.URL)
 				c.logger.Infof("dropped problematic node and retry: %v", rpcError.Error())
 			} else {
 				return err
 			}
+		}
+		attempts++
+		if attempts >= maxRetry {
+			return rpcError
 		}
 	}
 }
