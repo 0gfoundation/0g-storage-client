@@ -2,7 +2,6 @@ package kv
 
 import (
 	"context"
-
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/node"
@@ -97,9 +96,13 @@ func (b *Batcher) Exec(ctx context.Context, option ...transfer.UploadOption) (co
 		opt = option[0]
 	}
 	opt.Tags = b.buildTags()
-	txHash, _, err := uploader.Upload(ctx, data, opt)
+	txHashes, _, err := uploader.SplitableUpload(ctx, data, 4*1024*1024*1024, opt)
 	if err != nil {
-		return txHash, errors.WithMessagef(err, "Failed to upload data")
+		return common.Hash{}, errors.WithMessagef(err, "Failed to upload data")
+	}
+	var txHash common.Hash
+	if len(txHashes) > 0 {
+		txHash = txHashes[0]
 	}
 	return txHash, nil
 }

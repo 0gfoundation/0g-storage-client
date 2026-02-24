@@ -106,27 +106,6 @@ func addToCounter(counter []byte, val uint64) {
 	binary.BigEndian.PutUint64(counter[0:8], hi)
 }
 
-// EncryptBytes encrypts plaintext bytes using AES-256-CTR with a random nonce.
-// Returns [1-byte version][16-byte nonce][ciphertext].
-func EncryptBytes(key *[32]byte, plaintext []byte) ([]byte, error) {
-	header, err := NewEncryptionHeader()
-	if err != nil {
-		return nil, err
-	}
-	headerBytes := header.ToBytes()
-	result := make([]byte, EncryptionHeaderSize+len(plaintext))
-	copy(result[:EncryptionHeaderSize], headerBytes[:])
-	copy(result[EncryptionHeaderSize:], plaintext)
-	CryptAt(key, &header.Nonce, 0, result[EncryptionHeaderSize:])
-	return result, nil
-}
-
-// DecryptBytes decrypts data produced by EncryptBytes: strips the header and decrypts.
-// Returns the original plaintext.
-func DecryptBytes(key *[32]byte, encrypted []byte) ([]byte, error) {
-	return DecryptFile(key, encrypted)
-}
-
 // DecryptFile decrypts a full downloaded file: strips the header and decrypts the remaining bytes.
 // Returns the decrypted data without the header.
 func DecryptFile(key *[32]byte, encrypted []byte) ([]byte, error) {
@@ -163,27 +142,4 @@ func DecryptFragmentData(key *[32]byte, header *EncryptionHeader, fragmentData [
 	copy(dataCopy, fragmentData)
 	CryptAt(key, &header.Nonce, dataOffset, dataCopy)
 	return dataCopy, dataOffset + uint64(len(dataCopy)), nil
-}
-
-// DecryptSegment decrypts a single downloaded segment.
-// For segment 0: the first EncryptionHeaderSize bytes are the header, the rest is encrypted data starting at offset 0.
-// For other segments: all bytes are encrypted data at the correct offset.
-// segmentSize is the standard segment size (e.g. DefaultSegmentSize = 256KB).
-func DecryptSegment(key *[32]byte, segmentIndex, segmentSize uint64, segmentData []byte, header *EncryptionHeader) []byte {
-	if segmentIndex == 0 {
-		// First segment: skip header bytes, decrypt the rest starting at data offset 0
-		encrypted := segmentData[EncryptionHeaderSize:]
-		data := make([]byte, len(encrypted))
-		copy(data, encrypted)
-		CryptAt(key, &header.Nonce, 0, data)
-		return data
-	}
-
-	// Other segments: all bytes are encrypted data
-	// Data offset = segmentIndex * segmentSize - EncryptionHeaderSize
-	dataOffset := segmentIndex*segmentSize - uint64(EncryptionHeaderSize)
-	data := make([]byte, len(segmentData))
-	copy(data, segmentData)
-	CryptAt(key, &header.Nonce, dataOffset, data)
-	return data
 }

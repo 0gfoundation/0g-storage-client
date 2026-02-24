@@ -349,6 +349,94 @@ func TestEncryptedDataSplitMultipleSizes(t *testing.T) {
 	}
 }
 
+func TestEncryptedDataOneByteRoundtrip(t *testing.T) {
+	original := []byte{0x42}
+	inner, err := NewDataInMemory(original)
+	require.NoError(t, err)
+
+	key := [32]byte{}
+	for i := range key {
+		key[i] = 0x42
+	}
+	encrypted, err := NewEncryptedData(inner, key)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1+EncryptionHeaderSize), encrypted.Size())
+
+	// Read full encrypted stream
+	buf := make([]byte, int(encrypted.Size()))
+	n, err := encrypted.Read(buf, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int(encrypted.Size()), n)
+
+	// Decrypt and verify
+	decrypted, err := DecryptFile(&key, buf)
+	require.NoError(t, err)
+	assert.Equal(t, original, decrypted)
+}
+
+func TestEncryptedDataReadPastEnd(t *testing.T) {
+	original := make([]byte, 100)
+	inner, err := NewDataInMemory(original)
+	require.NoError(t, err)
+
+	key := [32]byte{}
+	encrypted, err := NewEncryptedData(inner, key)
+	require.NoError(t, err)
+
+	// Read at exact end → should return 0 bytes
+	buf := make([]byte, 10)
+	n, err := encrypted.Read(buf, encrypted.Size())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	// Read past end → should return 0 bytes
+	n, err = encrypted.Read(buf, encrypted.Size()+100)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	// Read at negative offset → should return 0 bytes
+	n, err = encrypted.Read(buf, -1)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+func TestEncryptedDataExactFragmentBoundary(t *testing.T) {
+	// Choose data size so encrypted size (data + 17) exactly equals fragment size
+	fragSize := int64(256)
+	dataSize := int(fragSize - int64(EncryptionHeaderSize)) // 239 bytes
+
+	original := make([]byte, dataSize)
+	for i := range original {
+		original[i] = byte(i % 251)
+	}
+	inner, err := NewDataInMemory(original)
+	require.NoError(t, err)
+
+	key := [32]byte{}
+	for i := range key {
+		key[i] = 0x42
+	}
+	encrypted, err := NewEncryptedData(inner, key)
+	require.NoError(t, err)
+
+	assert.Equal(t, fragSize, encrypted.Size())
+
+	// Split should return single fragment (encrypted data fits exactly)
+	fragments := encrypted.Split(fragSize)
+	assert.Equal(t, 1, len(fragments))
+
+	// Full roundtrip
+	buf := make([]byte, int(encrypted.Size()))
+	n, err := encrypted.Read(buf, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int(encrypted.Size()), n)
+
+	decrypted, err := DecryptFile(&key, buf)
+	require.NoError(t, err)
+	assert.Equal(t, original, decrypted)
+}
+
 // TestEncryptedFileSubmissionRootConsistency verifies that MerkleTree root and
 // CreateSubmission root match when EncryptedData wraps a File (not DataInMemory).
 // This catches the bug where File.Read returned 0 on non-EOF reads, causing

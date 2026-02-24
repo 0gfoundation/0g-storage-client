@@ -3,6 +3,7 @@ package transfer
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"time"
@@ -155,44 +156,57 @@ func NewUploaderWithContractConfig(ctx context.Context, w3Client *web3go.Client,
 	return uploader, nil
 }
 
+// wrapEncryption wraps data with AES-256-CTR encryption if an encryption key is provided.
+func (uploader *Uploader) wrapEncryption(data core.IterableData, opt UploadOption) (core.IterableData, error) {
+	if len(opt.EncryptionKey) == 0 {
+		return data, nil
+	}
+	if len(opt.EncryptionKey) != 32 {
+		return nil, errors.New("encryption key must be 32 bytes")
+	}
+	var key [32]byte
+	copy(key[:], opt.EncryptionKey)
+	encData, err := core.NewEncryptedData(data, key)
+	if err != nil {
+		return nil, errors.WithMessage(err, "Failed to create encrypted data")
+	}
+	uploader.logger.Info("Data encryption enabled")
+	return encData, nil
+}
+
 // SplitableUpload submit data to 0g storage contract and large data will be splited to reduce padding cost.
 func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.IterableData, fragmentSize int64, option ...UploadOption) ([]common.Hash, []common.Hash, error) {
 	if fragmentSize < core.DefaultChunkSize {
 		fragmentSize = core.DefaultChunkSize
 	}
-	// align size of fragment to 2 power
-	fragmentSize = int64(core.NextPow2(uint64(fragmentSize)))
+	// align size of fragment to 2 power, guarding against int64 overflow
+	aligned := core.NextPow2(uint64(fragmentSize))
+	if aligned > uint64(math.MaxInt64) {
+		fragmentSize = math.MaxInt64
+	} else {
+		fragmentSize = int64(aligned)
+	}
 	uploader.logger.Infof("fragment size: %v", fragmentSize)
 
 	var opt UploadOption
 	if len(option) > 0 {
 		opt = option[0]
 	}
+	normalizeUploadOption(&opt)
 
 	// Wrap data with encryption BEFORE splitting so that the encrypted stream
 	// (including the 17-byte header) is what gets fragmented. This ensures the
 	// header ends up in fragment 0 and all fragments contain encrypted bytes.
-	if len(opt.EncryptionKey) > 0 {
-		if len(opt.EncryptionKey) != 32 {
-			return nil, nil, errors.New("encryption key must be 32 bytes")
-		}
-		var key [32]byte
-		copy(key[:], opt.EncryptionKey)
-		encData, err := core.NewEncryptedData(data, key)
-		if err != nil {
-			return nil, nil, errors.WithMessage(err, "Failed to create encrypted data")
-		}
-		data = encData
-		uploader.logger.Info("Data encryption enabled (pre-split)")
-
-		// Clear encryption key to prevent double encryption in Upload/BatchUpload
-		opt.EncryptionKey = nil
+	var err error
+	data, err = uploader.wrapEncryption(data, opt)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	txHashes := make([]common.Hash, 0)
 	rootHashes := make([]common.Hash, 0)
 	if data.Size() <= fragmentSize {
-		txHash, rootHash, err := uploader.Upload(ctx, data, opt)
+		txHash, rootHash, err := uploader.uploadInner(ctx, data, opt)
 		if err != nil {
 			return txHashes, rootHashes, err
 		}
@@ -229,35 +243,44 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 	return txHashes, rootHashes, nil
 }
 
+// normalizeUploadOption applies safe defaults to an UploadOption so that
+// SDK callers who pass a zero-valued struct get correct behaviour.
+func normalizeUploadOption(opt *UploadOption) {
+	if opt.Method == "" {
+		opt.Method = "random"
+	}
+	if opt.Tags == nil {
+		opt.Tags = []byte{}
+	}
+}
+
 // Upload submit data to 0g storage contract, then transfer the data to the storage nodes.
 // returns the submission transaction hash and the hash will be zero if transaction is skipped.
 func (uploader *Uploader) Upload(ctx context.Context, data core.IterableData, option ...UploadOption) (common.Hash, common.Hash, error) {
-	stageTimer := time.Now()
-
 	var opt UploadOption
 	if len(option) > 0 {
 		opt = option[0]
 	}
+	normalizeUploadOption(&opt)
+	var err error
+	data, err = uploader.wrapEncryption(data, opt)
+	if err != nil {
+		return common.Hash{}, common.Hash{}, err
+	}
+	return uploader.uploadInner(ctx, data, opt)
+}
+
+// uploadInner is the shared core upload logic used by both Upload and SplitableUpload.
+// It does NOT handle encryption — callers are responsible for wrapping data if needed.
+func (uploader *Uploader) uploadInner(ctx context.Context, data core.IterableData, opt UploadOption) (common.Hash, common.Hash, error) {
+	stageTimer := time.Now()
+
 	if opt.Submitter == (common.Address{}) {
 		submitter, err := uploader.flow.GetSubmitterAddress()
 		if err != nil {
 			return common.Hash{}, common.Hash{}, errors.WithMessage(err, "Failed to get submitter address from flow contract")
 		}
 		opt.Submitter = submitter
-	}
-	// Wrap data with encryption if an encryption key is provided
-	if len(opt.EncryptionKey) > 0 {
-		if len(opt.EncryptionKey) != 32 {
-			return common.Hash{}, common.Hash{}, errors.New("encryption key must be 32 bytes")
-		}
-		var key [32]byte
-		copy(key[:], opt.EncryptionKey)
-		encData, err := core.NewEncryptedData(data, key)
-		if err != nil {
-			return common.Hash{}, common.Hash{}, errors.WithMessage(err, "Failed to create encrypted data")
-		}
-		data = encData
-		uploader.logger.Info("Data encryption enabled")
 	}
 
 	fastMode := opt.FastMode && data.Size() <= fastUploadMaxSize
@@ -496,17 +519,6 @@ func (uploader *Uploader) submitLogEntryAndWait(ctx context.Context, data core.I
 	}
 
 	return txHash, info, nil
-}
-
-func (uploader *Uploader) UploadFile(ctx context.Context, path string, option ...UploadOption) (txnHash common.Hash, rootHash common.Hash, err error) {
-	file, err := core.Open(path)
-	if err != nil {
-		err = errors.WithMessagef(err, "failed to open file %s", path)
-		return
-	}
-	defer file.Close()
-
-	return uploader.Upload(ctx, file, option...)
 }
 
 // SubmitLogEntry submit the data to 0g storage contract by sending a transaction

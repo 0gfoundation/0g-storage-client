@@ -84,6 +84,8 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
     def run_test(self):
         self.__test_unencrypted_directory()
         self.__test_encrypted_directory()
+        self.__test_fragmented_directory()
+        self.__test_encrypted_fragmented_directory()
 
     def __test_unencrypted_directory(self):
         temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
@@ -209,6 +211,146 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         ), "Encrypted directory content mismatch"
 
         self.log.info("Encrypted directory upload/download test passed")
+
+    def __test_fragmented_directory(self):
+        """Test directory upload with small fragment size to force file splitting."""
+        fragment_size = 262144  # 256KB — one segment, forces splitting for larger files
+
+        temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
+
+        # Create a file larger than fragment size so it gets split into multiple roots
+        large_file_path = os.path.join(temp_dir.name, "large_file.bin")
+        with open(large_file_path, "wb") as f:
+            f.write(os.urandom(fragment_size * 3))  # 768KB → 3 fragments
+
+        # Create a small file that fits in a single fragment (no splitting)
+        small_file_path = os.path.join(temp_dir.name, "small_file.bin")
+        with open(small_file_path, "wb") as f:
+            f.write(os.urandom(1024))
+
+        # Create a subdirectory with a file that also gets split
+        subdir_path = os.path.join(temp_dir.name, "subdir")
+        os.makedirs(subdir_path)
+        with open(os.path.join(subdir_path, "split_file.bin"), "wb") as f:
+            f.write(os.urandom(fragment_size * 2))  # 512KB → 2 fragments
+
+        self.log.info(
+            "Uploading fragmented directory '%s' with fragment_size=%d",
+            temp_dir.name,
+            fragment_size,
+        )
+
+        submission_count = self.contract.num_submissions()
+
+        root_hash = self._upload_directory_use_cli(
+            self.blockchain_nodes[0].rpc_url,
+            GENESIS_ACCOUNT.key,
+            ",".join([x.rpc_url for x in self.nodes]),
+            None,
+            temp_dir,
+            fragment_size=fragment_size,
+        )
+
+        self.log.info("Root hash: %s", root_hash)
+
+        # 3 fragments (large_file) + 1 (small_file) + 2 fragments (split_file) + 1 metadata = 7
+        wait_until(
+            lambda: self.contract.num_submissions() == submission_count + 7,
+            timeout=120,
+        )
+
+        for node_idx in range(4):
+            client = self.nodes[node_idx]
+            wait_until(lambda: client.zgs_get_file_info(root_hash) is not None)
+            wait_until(lambda: client.zgs_get_file_info(root_hash)["finalized"])
+
+        directory_to_download = os.path.join(self.root_dir, "download_fragmented")
+        self._download_directory_use_cli(
+            ",".join([x.rpc_url for x in self.nodes]),
+            None,
+            root=root_hash,
+            with_proof=True,
+            dir_to_download=directory_to_download,
+            remove=False,
+        )
+        assert directories_are_equal(
+            temp_dir.name, directory_to_download
+        ), "Fragmented directory content mismatch"
+
+        self.log.info("Fragmented directory upload/download test passed")
+
+    def __test_encrypted_fragmented_directory(self):
+        """Test directory upload with encryption AND small fragment size (encrypt-then-split)."""
+        encryption_key = "0x" + "cd" * 32
+        fragment_size = 262144  # 256KB
+
+        temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
+
+        # Create a file larger than fragment size — will be encrypted then split
+        large_file_path = os.path.join(temp_dir.name, "large_enc.bin")
+        with open(large_file_path, "wb") as f:
+            f.write(os.urandom(fragment_size * 2))  # 512KB → 2 fragments after encryption
+
+        # Create a small file that fits in one fragment after encryption
+        small_file_path = os.path.join(temp_dir.name, "small_enc.bin")
+        with open(small_file_path, "wb") as f:
+            f.write(os.urandom(2048))
+
+        # Create a subdirectory with a split file
+        subdir_path = os.path.join(temp_dir.name, "subdir")
+        os.makedirs(subdir_path)
+        with open(os.path.join(subdir_path, "nested_enc.bin"), "wb") as f:
+            f.write(os.urandom(fragment_size * 3))  # 768KB → 3 fragments after encryption
+
+        self.log.info(
+            "Uploading encrypted+fragmented directory '%s'", temp_dir.name
+        )
+
+        submission_count = self.contract.num_submissions()
+
+        root_hash = self._upload_directory_use_cli(
+            self.blockchain_nodes[0].rpc_url,
+            GENESIS_ACCOUNT.key,
+            ",".join([x.rpc_url for x in self.nodes]),
+            None,
+            temp_dir,
+            fragment_size=fragment_size,
+            encryption_key=encryption_key,
+        )
+
+        self.log.info("Root hash: %s", root_hash)
+
+        # Encryption adds 17-byte header, which may push fragment count up by 1
+        # large_enc: ~512KB + 17B encrypted → 3 fragments (crosses 2-segment boundary)
+        # small_enc: ~2KB + 17B → 1 fragment
+        # nested_enc: ~768KB + 17B encrypted → 4 fragments (crosses 3-segment boundary)
+        # metadata: 1 fragment
+        # Total: 3 + 1 + 4 + 1 = 9
+        wait_until(
+            lambda: self.contract.num_submissions() >= submission_count + 9,
+            timeout=120,
+        )
+
+        for node_idx in range(4):
+            client = self.nodes[node_idx]
+            wait_until(lambda: client.zgs_get_file_info(root_hash) is not None)
+            wait_until(lambda: client.zgs_get_file_info(root_hash)["finalized"])
+
+        dir_to_download = os.path.join(self.root_dir, "download_enc_frag")
+        self._download_directory_use_cli(
+            ",".join([x.rpc_url for x in self.nodes]),
+            None,
+            root=root_hash,
+            with_proof=True,
+            dir_to_download=dir_to_download,
+            remove=False,
+            encryption_key=encryption_key,
+        )
+        assert directories_are_equal(
+            temp_dir.name, dir_to_download
+        ), "Encrypted+fragmented directory content mismatch"
+
+        self.log.info("Encrypted+fragmented directory upload/download test passed")
 
     def _upload_directory_use_cli(
         self,

@@ -4,19 +4,18 @@ import (
 	"testing"
 
 	"github.com/0gfoundation/0g-storage-client/transfer/dir"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestDiffIdenticalDirectories(t *testing.T) {
 	dir1 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
-		dir.NewFileFsNode("file2.txt", common.HexToHash("0x2"), 200),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
+		dir.NewFileFsNode("file2.txt", []string{"0x2"}, 200),
 	})
 
 	dir2 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
-		dir.NewFileFsNode("file2.txt", common.HexToHash("0x2"), 200),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
+		dir.NewFileFsNode("file2.txt", []string{"0x2"}, 200),
 	})
 
 	diffNode, err := dir.Diff(dir1, dir2)
@@ -27,12 +26,12 @@ func TestDiffIdenticalDirectories(t *testing.T) {
 
 func TestDiffFileAdded(t *testing.T) {
 	dir1 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
 	})
 
 	dir2 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
-		dir.NewFileFsNode("file2.txt", common.HexToHash("0x2"), 200),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
+		dir.NewFileFsNode("file2.txt", []string{"0x2"}, 200),
 	})
 
 	diffNode, err := dir.Diff(dir1, dir2)
@@ -48,12 +47,12 @@ func TestDiffFileAdded(t *testing.T) {
 
 func TestDiffFileRemoved(t *testing.T) {
 	dir1 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
-		dir.NewFileFsNode("file2.txt", common.HexToHash("0x2"), 200),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
+		dir.NewFileFsNode("file2.txt", []string{"0x2"}, 200),
 	})
 
 	dir2 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
 	})
 
 	diffNode, err := dir.Diff(dir1, dir2)
@@ -69,11 +68,11 @@ func TestDiffFileRemoved(t *testing.T) {
 
 func TestDiffFileModified(t *testing.T) {
 	dir1 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
 	})
 
 	dir2 := dir.NewDirFsNode("root", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x2"), 150),
+		dir.NewFileFsNode("file1.txt", []string{"0x2"}, 150),
 	})
 
 	diffNode, err := dir.Diff(dir1, dir2)
@@ -89,11 +88,11 @@ func TestDiffFileModified(t *testing.T) {
 
 func TestDiffSubdirectoryChanges(t *testing.T) {
 	subDir1 := dir.NewDirFsNode("subdir", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x1"), 100),
+		dir.NewFileFsNode("file1.txt", []string{"0x1"}, 100),
 	})
 
 	subDir2 := dir.NewDirFsNode("subdir", []*dir.FsNode{
-		dir.NewFileFsNode("file1.txt", common.HexToHash("0x2"), 150),
+		dir.NewFileFsNode("file1.txt", []string{"0x2"}, 150),
 	})
 
 	dir1 := dir.NewDirFsNode("root", []*dir.FsNode{subDir1})

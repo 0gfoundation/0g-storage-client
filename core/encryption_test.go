@@ -69,6 +69,33 @@ func TestCryptAtOffset(t *testing.T) {
 	assert.Equal(t, full[50:], part2)
 }
 
+func TestDecryptFileTooShort(t *testing.T) {
+	key := [32]byte{}
+	// Data shorter than header
+	_, err := DecryptFile(&key, []byte{0x01, 0x02})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too short")
+}
+
+func TestDecryptFileWrongVersion(t *testing.T) {
+	key := [32]byte{}
+	// Header with wrong version byte (0xFF), followed by 16 nonce bytes + 1 data byte
+	data := make([]byte, EncryptionHeaderSize+1)
+	data[0] = 0xFF // wrong version
+	_, err := DecryptFile(&key, data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported encryption version")
+}
+
+func TestDecryptFragmentDataFirstFragmentTooShort(t *testing.T) {
+	key := [32]byte{}
+	header := &EncryptionHeader{Version: EncryptionVersion}
+	// First fragment shorter than header size
+	_, _, err := DecryptFragmentData(&key, header, []byte{0x01}, true, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "first fragment too short")
+}
+
 func TestDecryptFile(t *testing.T) {
 	key := [32]byte{}
 	for i := range key {
@@ -93,157 +120,4 @@ func TestDecryptFile(t *testing.T) {
 	decrypted, err := DecryptFile(&key, encryptedFile)
 	require.NoError(t, err)
 	assert.Equal(t, original, decrypted)
-}
-
-func TestDecryptSegmentZero(t *testing.T) {
-	key := [32]byte{}
-	for i := range key {
-		key[i] = 0x42
-	}
-	header, err := NewEncryptionHeader()
-	require.NoError(t, err)
-	segmentSize := uint64(256 * 1024) // 256KB
-
-	// Build segment 0: header + encrypted plaintext
-	plaintext := make([]byte, int(segmentSize)-EncryptionHeaderSize)
-	for i := range plaintext {
-		plaintext[i] = 0xAB
-	}
-	encrypted := make([]byte, len(plaintext))
-	copy(encrypted, plaintext)
-	CryptAt(&key, &header.Nonce, 0, encrypted)
-
-	headerBytes := header.ToBytes()
-	segmentData := make([]byte, 0, segmentSize)
-	segmentData = append(segmentData, headerBytes[:]...)
-	segmentData = append(segmentData, encrypted...)
-	assert.Equal(t, int(segmentSize), len(segmentData))
-
-	// decrypt_segment for segment 0 returns plaintext without header
-	decrypted := DecryptSegment(&key, 0, segmentSize, segmentData, header)
-	assert.Equal(t, plaintext, decrypted)
-}
-
-func TestDecryptSegmentNonzero(t *testing.T) {
-	key := [32]byte{}
-	for i := range key {
-		key[i] = 0x42
-	}
-	header, err := NewEncryptionHeader()
-	require.NoError(t, err)
-	segmentSize := uint64(256 * 1024)
-
-	// Segment 1's data offset is segmentSize - HeaderSize
-	dataOffset := segmentSize - uint64(EncryptionHeaderSize)
-	plaintext := make([]byte, segmentSize)
-	for i := range plaintext {
-		plaintext[i] = 0xCD
-	}
-	encrypted := make([]byte, len(plaintext))
-	copy(encrypted, plaintext)
-	CryptAt(&key, &header.Nonce, dataOffset, encrypted)
-
-	decrypted := DecryptSegment(&key, 1, segmentSize, encrypted, header)
-	assert.Equal(t, plaintext, decrypted)
-}
-
-func TestDecryptSegmentPaddedPreservesHeader(t *testing.T) {
-	// Simulates what download_segment_padded does for segment 0
-	key := [32]byte{}
-	for i := range key {
-		key[i] = 0x42
-	}
-	header, err := NewEncryptionHeader()
-	require.NoError(t, err)
-	segmentSize := uint64(256 * 1024)
-
-	plaintext := make([]byte, int(segmentSize)-EncryptionHeaderSize)
-	for i := range plaintext {
-		plaintext[i] = 0xEF
-	}
-	encrypted := make([]byte, len(plaintext))
-	copy(encrypted, plaintext)
-	CryptAt(&key, &header.Nonce, 0, encrypted)
-
-	headerBytes := header.ToBytes()
-	rawSegment := make([]byte, 0, segmentSize)
-	rawSegment = append(rawSegment, headerBytes[:]...)
-	rawSegment = append(rawSegment, encrypted...)
-
-	// Decrypt in-place after header (what download_segment_padded does)
-	result := make([]byte, len(rawSegment))
-	copy(result, rawSegment)
-	CryptAt(&key, &header.Nonce, 0, result[EncryptionHeaderSize:])
-
-	// Header preserved, data decrypted
-	assert.Equal(t, headerBytes[:], result[:EncryptionHeaderSize])
-	assert.Equal(t, plaintext, result[EncryptionHeaderSize:])
-	assert.Equal(t, int(segmentSize), len(result))
-}
-
-func TestEncryptDecryptBytes(t *testing.T) {
-	key := [32]byte{}
-	for i := range key {
-		key[i] = 0x42
-	}
-
-	tests := []struct {
-		name string
-		data []byte
-	}{
-		{"empty", []byte{}},
-		{"short", []byte("hello")},
-		{"binary", []byte{0x00, 0xff, 0x42, 0x13}},
-		{"long", make([]byte, 10000)},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			encrypted, err := EncryptBytes(&key, tt.data)
-			require.NoError(t, err)
-			assert.Equal(t, EncryptionHeaderSize+len(tt.data), len(encrypted))
-
-			decrypted, err := DecryptBytes(&key, encrypted)
-			require.NoError(t, err)
-			assert.Equal(t, tt.data, decrypted)
-		})
-	}
-}
-
-func TestMultiSegmentDecryptMatchesFullFile(t *testing.T) {
-	// Encrypt a file spanning 2 segments, decrypt per-segment, verify matches full decrypt
-	key := [32]byte{}
-	for i := range key {
-		key[i] = 0x42
-	}
-	header, err := NewEncryptionHeader()
-	require.NoError(t, err)
-	segmentSize := uint64(256) // Small for testing
-
-	plaintext := make([]byte, int(segmentSize)*2-EncryptionHeaderSize)
-	for i := range plaintext {
-		plaintext[i] = 0x77
-	}
-	fullEncrypted := make([]byte, len(plaintext))
-	copy(fullEncrypted, plaintext)
-	CryptAt(&key, &header.Nonce, 0, fullEncrypted)
-
-	// Build encrypted file
-	headerBytes := header.ToBytes()
-	fileData := make([]byte, 0, EncryptionHeaderSize+len(fullEncrypted))
-	fileData = append(fileData, headerBytes[:]...)
-	fileData = append(fileData, fullEncrypted...)
-
-	// Segment 0: first segmentSize bytes of the file
-	seg0Data := fileData[:segmentSize]
-	seg0Decrypted := DecryptSegment(&key, 0, segmentSize, seg0Data, header)
-
-	// Segment 1: remaining bytes
-	seg1Data := fileData[segmentSize:]
-	seg1Decrypted := DecryptSegment(&key, 1, segmentSize, seg1Data, header)
-
-	// Concatenated decrypted segments should equal original plaintext
-	combined := make([]byte, 0, len(plaintext))
-	combined = append(combined, seg0Decrypted...)
-	combined = append(combined, seg1Decrypted...)
-	assert.Equal(t, plaintext, combined)
 }

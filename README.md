@@ -14,7 +14,7 @@ Following packages can help applications to integrate with 0g storage network:
 - **[core](core)**: provides underlying utilities to build merkle tree for files or iterable data, defines data padding standard to interact with [Flow contract](contract/contract.go), and implements client-side AES-256-CTR encryption for file uploads.
 - **[node](node)**: defines RPC client structures to facilitate RPC interactions with 0g storage nodes and 0g key-value (KV) nodes.
 - **[kv](kv)**: defines structures to interact with 0g storage kv, with optional stream data encryption via `UploadOption.EncryptionKey`.
-- **[transfer](transfer)**: defines data structures and functions for transferring data between local and 0g storage, including encrypted upload/download support via `UploadOption.EncryptionKey` and `Downloader.WithEncryptionKey`.
+- **[transfer](transfer)**: defines data structures and functions for transferring data between local and 0g storage, including encrypted upload/download support via `UploadOption.EncryptionKey` and `Downloader.WithEncryptionKey`. SDK callers can pass a zero-valued `UploadOption`; safe defaults are applied automatically (e.g. `Method` defaults to `"random"`, `Tags` defaults to empty bytes).
 - **[indexer](indexer)**: select storage nodes to upload data from indexer which maintains trusted node list. Besides, allow clients to download files via HTTP GET requests.
 
 ## CLI

@@ -43,8 +43,13 @@ func DownloadDir(ctx context.Context, downloader IDownloader, root, filename str
 		// Only download if it's a file and has content
 		var persist func(string) error
 		if nodes[i].Type == dir.FileTypeFile && nodes[i].Size > 0 {
-			// Generate a function to persist the file by downloading it.
-			persist = downloadPersistFunc(downloader, ctx, nodes[i].Root, withProof)
+			if len(nodes[i].Roots) == 1 {
+				// Single root — download as a single file.
+				persist = downloadPersistFunc(downloader, ctx, nodes[i].Roots[0], withProof)
+			} else if len(nodes[i].Roots) > 1 {
+				// Multiple roots — file was split into fragments.
+				persist = downloadFragmentsPersistFunc(downloader, ctx, nodes[i].Roots, withProof)
+			}
 		}
 
 		logrus.WithFields(logrus.Fields{
@@ -112,12 +117,23 @@ func BuildFileTree(ctx context.Context, downloader IDownloader, root string, pro
 	return &tree, nil
 }
 
-// downloadPersistFunc is a helper function that returns a function that downloads a file from ZeroGStorage network.
+// downloadPersistFunc returns a function that downloads a single-root file from the network.
 func downloadPersistFunc(downloader IDownloader, ctx context.Context, root string, withProof bool) func(string) error {
 	return func(path string) error {
 		err := downloader.Download(ctx, root, path, withProof)
 		if err != nil && !errors.Is(err, ErrFileAlreadyExists) {
 			return errors.WithMessagef(err, "failed to download file with root %s", root)
+		}
+		return nil
+	}
+}
+
+// downloadFragmentsPersistFunc returns a function that downloads a multi-root (split) file from the network.
+func downloadFragmentsPersistFunc(downloader IDownloader, ctx context.Context, roots []string, withProof bool) func(string) error {
+	return func(path string) error {
+		err := downloader.DownloadFragments(ctx, roots, path, withProof)
+		if err != nil && !errors.Is(err, ErrFileAlreadyExists) {
+			return errors.WithMessagef(err, "failed to download file fragments with roots %v", roots)
 		}
 		return nil
 	}

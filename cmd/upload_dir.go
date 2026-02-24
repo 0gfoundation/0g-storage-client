@@ -100,7 +100,7 @@ func uploadDir(*cobra.Command, []string) {
 	}
 	defer closer()
 
-	txnHash, rootHash, err := uploader.UploadDir(ctx, uploadDirArgs.file, opt)
+	txnHash, rootHash, err := uploader.UploadDir(ctx, uploadDirArgs.file, uploadDirArgs.fragmentSize, opt)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to upload directory")
 	}
