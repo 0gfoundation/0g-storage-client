@@ -74,15 +74,19 @@ func uploadDir(*cobra.Command, []string) {
 		}
 	}
 	opt := transfer.UploadOption{
-		Submitter:        submitter,
+		TransactionOption: transfer.TransactionOption{
+			Submitter: submitter,
+		},
 		Tags:             hexutil.MustDecode(uploadDirArgs.tags),
+		EncryptionKey:    encryptionKey,
 		FinalityRequired: finalityRequired,
 		TaskSize:         uploadDirArgs.taskSize,
 		ExpectedReplica:  uploadDirArgs.expectedReplica,
 		SkipTx:           uploadDirArgs.skipTx,
 		Method:           uploadDirArgs.method,
 		FullTrusted:      uploadDirArgs.fullTrusted,
-		EncryptionKey:    encryptionKey,
+		FragmentSize:     uploadDirArgs.fragmentSize,
+		BatchSize:        uploadDirArgs.batchSize,
 	}
 
 	uploader, closer, err := transfer.NewUploaderFromConfig(ctx, w3client, transfer.UploaderConfig{
@@ -100,7 +104,7 @@ func uploadDir(*cobra.Command, []string) {
 	}
 	defer closer()
 
-	txnHash, rootHash, err := uploader.UploadDir(ctx, uploadDirArgs.file, uploadDirArgs.fragmentSize, opt)
+	txnHash, rootHash, err := uploader.UploadDir(ctx, uploadDirArgs.file, opt)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to upload directory")
 	}

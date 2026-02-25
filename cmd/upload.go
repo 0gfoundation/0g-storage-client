@@ -56,6 +56,7 @@ type uploadArgument struct {
 	fastMode         bool
 
 	fragmentSize int64
+	batchSize    uint
 	maxGasPrice  uint
 	nRetries     int
 	step         int64
@@ -89,6 +90,7 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().BoolVar(&args.fastMode, "fast-mode", true, "Enable fast mode (no receipt wait, root-based upload for small files)")
 
 	cmd.Flags().Int64Var(&args.fragmentSize, "fragment-size", 1024*1024*1024*4, "the size of fragment to split into when file is too large")
+	cmd.Flags().UintVar(&args.batchSize, "batch-size", 10, "number of fragments to submit in a single batch")
 
 	cmd.Flags().IntVar(&args.routines, "routines", runtime.GOMAXPROCS(0), "number of go routines for uploading simutanously")
 	cmd.Flags().UintVar(&args.maxGasPrice, "max-gas-price", 0, "max gas price to send transaction")
@@ -179,21 +181,25 @@ func upload(*cobra.Command, []string) {
 	}
 
 	opt := transfer.UploadOption{
-		Submitter:        submitter,
+		TransactionOption: transfer.TransactionOption{
+			Submitter:   submitter,
+			Fee:         fee,
+			Nonce:       nonce,
+			MaxGasPrice: maxGasPrice,
+			NRetries:    uploadArgs.nRetries,
+			Step:        uploadArgs.step,
+		},
 		Tags:             hexutil.MustDecode(uploadArgs.tags),
+		EncryptionKey:    encryptionKey,
 		FinalityRequired: finalityRequired,
 		TaskSize:         uploadArgs.taskSize,
 		ExpectedReplica:  uploadArgs.expectedReplica,
 		SkipTx:           uploadArgs.skipTx,
-		Fee:              fee,
-		Nonce:            nonce,
-		MaxGasPrice:      maxGasPrice,
-		NRetries:         uploadArgs.nRetries,
-		Step:             uploadArgs.step,
+		FastMode:         uploadArgs.fastMode,
 		Method:           uploadArgs.method,
 		FullTrusted:      uploadArgs.fullTrusted,
-		FastMode:         uploadArgs.fastMode,
-		EncryptionKey:    encryptionKey,
+		FragmentSize:     uploadArgs.fragmentSize,
+		BatchSize:        uploadArgs.batchSize,
 	}
 
 	file, err := core.Open(uploadArgs.file)
@@ -218,7 +224,7 @@ func upload(*cobra.Command, []string) {
 		}
 		defer indexerClient.Close()
 
-		_, roots, err = indexerClient.SplitableUpload(ctx, w3client, file, uploadArgs.fragmentSize, opt)
+		_, roots, err = indexerClient.SplitableUpload(ctx, w3client, file, opt)
 		if err != nil {
 			logrus.WithError(err).Fatal("Failed to upload file")
 		}
@@ -238,7 +244,7 @@ func upload(*cobra.Command, []string) {
 		}
 		defer closer()
 
-		_, roots, err = uploader.SplitableUpload(ctx, file, uploadArgs.fragmentSize, opt)
+		_, roots, err = uploader.SplitableUpload(ctx, file, opt)
 		if err != nil {
 			logrus.WithError(err).Fatal("Failed to upload file")
 		}

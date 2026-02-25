@@ -39,7 +39,7 @@ func runTest() error {
 	if err != nil {
 		return errors.WithMessage(err, "failed to initialize indexer client")
 	}
-	if _, _, err := indexerClient.SplitableUpload(ctx, w3client, data, 1024*1024*1024*4, transfer.UploadOption{
+	if _, _, err := indexerClient.SplitableUpload(ctx, w3client, data, transfer.UploadOption{
 		FinalityRequired: transfer.FileFinalized,
 		Method:           "min",
 		FullTrusted:      true,

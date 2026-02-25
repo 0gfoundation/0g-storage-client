@@ -104,9 +104,11 @@ func runTest() error {
 	}
 	submitter := sm.List()[0].Address()
 	_, _, err = uploader.SubmitLogEntry(ctx, []core.IterableData{data}, make([][]byte, 1), transfer.SubmitLogEntryOption{
-		Submitter: submitter,
-		NRetries:  5,
-		Step:      15,
+		TransactionOption: transfer.TransactionOption{
+			Submitter: submitter,
+			NRetries:  5,
+			Step:      15,
+		},
 	})
 	if err != nil {
 		return errors.WithMessage(err, "failed to submit log entry")

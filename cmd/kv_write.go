@@ -126,15 +126,17 @@ func kvWrite(*cobra.Command, []string) {
 		}
 	}
 	opt := transfer.UploadOption{
+		TransactionOption: transfer.TransactionOption{
+			Fee:   fee,
+			Nonce: nonce,
+		},
+		EncryptionKey:    encryptionKey,
 		FinalityRequired: finalityRequired,
 		TaskSize:         kvWriteArgs.taskSize,
 		ExpectedReplica:  kvWriteArgs.expectedReplica,
 		SkipTx:           kvWriteArgs.skipTx,
-		Fee:              fee,
-		Nonce:            nonce,
 		Method:           kvWriteArgs.method,
 		FullTrusted:      kvWriteArgs.fullTrusted,
-		EncryptionKey:    encryptionKey,
 	}
 
 	var clients *transfer.SelectedNodes

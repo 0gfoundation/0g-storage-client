@@ -35,26 +35,32 @@ func TestNormalizeUploadOption_ZeroValue(t *testing.T) {
 	assert.False(t, opt.FullTrusted)
 	assert.Nil(t, opt.EncryptionKey, "nil means no encryption")
 	assert.Equal(t, common.Address{}, opt.Submitter, "zero address filled later from flow contract")
+	assert.Equal(t, defaultFragmentSize, opt.FragmentSize, "fragment size defaults to 4GiB")
+	assert.Equal(t, defaultBatchSize, opt.BatchSize, "batch size defaults to 10")
 }
 
 // TestNormalizeUploadOption_Preserves verifies that user-supplied values are not overwritten.
 func TestNormalizeUploadOption_Preserves(t *testing.T) {
 	key := make([]byte, 32)
 	opt := UploadOption{
-		Method:           "max",
+		TransactionOption: TransactionOption{
+			Fee:         big.NewInt(100),
+			Nonce:       big.NewInt(42),
+			MaxGasPrice: big.NewInt(999),
+			NRetries:    3,
+			Step:        10,
+		},
 		Tags:             []byte{0x01, 0x02},
+		EncryptionKey:    key,
 		FinalityRequired: TransactionPacked,
 		TaskSize:         5,
 		ExpectedReplica:  3,
 		SkipTx:           true,
 		FastMode:         true,
-		Fee:              big.NewInt(100),
-		Nonce:            big.NewInt(42),
-		MaxGasPrice:      big.NewInt(999),
-		NRetries:         3,
-		Step:             10,
+		Method:           "max",
 		FullTrusted:      true,
-		EncryptionKey:    key,
+		FragmentSize:     1024 * 1024,
+		BatchSize:        20,
 	}
 	normalizeUploadOption(&opt)
 
@@ -72,6 +78,8 @@ func TestNormalizeUploadOption_Preserves(t *testing.T) {
 	assert.Equal(t, int64(10), opt.Step)
 	assert.True(t, opt.FullTrusted)
 	assert.Equal(t, key, opt.EncryptionKey)
+	assert.Equal(t, int64(1024*1024), opt.FragmentSize, "user-supplied fragment size preserved")
+	assert.Equal(t, uint(20), opt.BatchSize, "user-supplied batch size preserved")
 }
 
 // TestNormalizeBatchUploadOption_ZeroValue verifies batch defaults for SDK callers.
