@@ -11,7 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func (uploader *Uploader) UploadDir(ctx context.Context, folder string, fragmentSize int64, option ...UploadOption) (txnHash, rootHash common.Hash, _ error) {
+func (uploader *Uploader) UploadDir(ctx context.Context, folder string, option ...UploadOption) (txnHash, rootHash common.Hash, _ error) {
 	var opt UploadOption
 	if len(option) > 0 {
 		opt = option[0]
@@ -38,7 +38,7 @@ func (uploader *Uploader) UploadDir(ctx context.Context, folder string, fragment
 			return txnHash, rootHash, errors.WithMessagef(err, "failed to open file %s", path)
 		}
 
-		_, roots, err := uploader.SplitableUpload(ctx, file, fragmentSize, opt)
+		_, roots, err := uploader.SplitableUpload(ctx, file, opt)
 		file.Close()
 		if err != nil {
 			return txnHash, rootHash, errors.WithMessagef(err, "failed to upload file %s", path)
@@ -69,7 +69,7 @@ func (uploader *Uploader) UploadDir(ctx context.Context, folder string, fragment
 	}
 
 	// Upload the directory metadata via SplitableUpload.
-	txHashes, metaRoots, err := uploader.SplitableUpload(ctx, iterdata, fragmentSize, opt)
+	txHashes, metaRoots, err := uploader.SplitableUpload(ctx, iterdata, opt)
 	if err != nil {
 		return txnHash, rootHash, errors.WithMessage(err, "failed to upload directory metadata")
 	}

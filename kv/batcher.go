@@ -96,7 +96,7 @@ func (b *Batcher) Exec(ctx context.Context, option ...transfer.UploadOption) (co
 		opt = option[0]
 	}
 	opt.Tags = b.buildTags()
-	txHashes, _, err := uploader.SplitableUpload(ctx, data, 4*1024*1024*1024, opt)
+	txHashes, _, err := uploader.SplitableUpload(ctx, data, opt)
 	if err != nil {
 		return common.Hash{}, errors.WithMessagef(err, "Failed to upload data")
 	}

@@ -136,7 +136,7 @@ func (c *Client) NewUploaderFromIndexerNodes(ctx context.Context, segNum uint64,
 
 // SplitableUpload submits data and retries on node errors. If FullTrusted is false,
 // it tries once and falls back to full trusted nodes.
-func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, data core.IterableData, fragmentSize int64, option ...transfer.UploadOption) ([]eth_common.Hash, []eth_common.Hash, error) {
+func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, data core.IterableData, option ...transfer.UploadOption) ([]eth_common.Hash, []eth_common.Hash, error) {
 	var opt transfer.UploadOption
 	if len(option) > 0 {
 		opt = option[0]
@@ -156,7 +156,7 @@ func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, d
 			return nil, nil, err
 		}
 
-		txHashes, roots, err := uploader.SplitableUpload(ctx, data, fragmentSize, opt)
+		txHashes, roots, err := uploader.SplitableUpload(ctx, data, opt)
 		if err == nil {
 			return txHashes, roots, nil
 		}

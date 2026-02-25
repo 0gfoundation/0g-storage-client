@@ -2,7 +2,6 @@ package transfer
 
 import (
 	"context"
-	"math/big"
 	"sync"
 	"time"
 
@@ -17,15 +16,14 @@ import (
 
 // BatchUploadOption upload option for a batching
 type BatchUploadOption struct {
-	Submitter   common.Address // address of the transaction sender
-	Fee         *big.Int       // fee in neuron
-	Nonce       *big.Int       // nonce for transaction
-	MaxGasPrice *big.Int       // max gas price for transaction
-	NRetries    int            // number of retries for uploading
-	Step        int64          // step for uploading
-	TaskSize    uint           // number of files to upload simutanously
-	Method      string         // method for selecting nodes, can be "max", "random" or certain positive number in string
-	FullTrusted bool           // whether to use full trusted nodes
+	TransactionOption
+
+	// Node selection
+	Method      string // method for selecting nodes, can be "max", "min", "random" or certain positive number in string
+	FullTrusted bool   // whether to use full trusted nodes
+
+	// Batch behavior
+	TaskSize    uint           // number of files to upload simultaneously
 	DataOptions []UploadOption // upload option for single file, nonce and fee are ignored
 }
 
@@ -57,8 +55,6 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 		opts = option[0]
 	} else {
 		opts = BatchUploadOption{
-			Fee:         nil,
-			Nonce:       nil,
 			DataOptions: make([]UploadOption, n),
 			Method:      "random",
 			FullTrusted: true,
@@ -150,13 +146,8 @@ func (uploader *Uploader) BatchUpload(ctx context.Context, datas []core.Iterable
 		waitReceipt := true
 		receiptFlag := waitReceipt
 		submitOpt := SubmitLogEntryOption{
-			Submitter:   opts.Submitter,
-			Fee:         opts.Fee,
-			Nonce:       opts.Nonce,
-			MaxGasPrice: opts.MaxGasPrice,
-			NRetries:    opts.NRetries,
-			Step:        opts.Step,
-			WaitReceipt: &receiptFlag,
+			TransactionOption: opts.TransactionOption,
+			WaitReceipt:       &receiptFlag,
 		}
 		var err error
 		if txHash, receipt, err = uploader.SubmitLogEntry(ctx, toSubmitDatas, toSubmitTags, submitOpt); err != nil {

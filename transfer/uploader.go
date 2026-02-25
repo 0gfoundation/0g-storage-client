@@ -28,6 +28,7 @@ import (
 // defaultTaskSize is the default number of data segments to upload in a single upload RPC request
 const defaultTaskSize = uint(10)
 const defaultBatchSize = uint(10)
+const defaultFragmentSize = int64(4 * 1024 * 1024 * 1024)
 const fastUploadMaxSize = int64(256 * 1024)
 const slowParallelMaxSize = int64(2 * 1024 * 1024)
 
@@ -44,33 +45,43 @@ type SelectedNodes struct {
 	Discovered []*node.ZgsClient
 }
 
+// TransactionOption groups fields related to on-chain transaction submission.
+type TransactionOption struct {
+	Submitter   common.Address // address of the transaction sender
+	Fee         *big.Int       // fee in neuron
+	Nonce       *big.Int       // nonce for transaction
+	MaxGasPrice *big.Int       // max gas price for transaction
+	NRetries    int            // number of retries for uploading
+	Step        int64          // step for gas price increase (step/10, e.g. 15 means 1.5x)
+}
+
 // UploadOption upload option for a file
 type UploadOption struct {
-	Submitter        common.Address      // address of the transaction sender
-	Tags             []byte              // transaction tags
+	TransactionOption
+
+	// Data options
+	Tags          []byte // transaction tags
+	EncryptionKey []byte // optional 32-byte AES-256 encryption key; when set, data is encrypted before upload
+
+	// Upload behavior
 	FinalityRequired FinalityRequirement // finality setting
-	TaskSize         uint                // number of segment to upload in single rpc request
+	TaskSize         uint                // number of segments to upload in single rpc request
 	ExpectedReplica  uint                // expected number of replications
 	SkipTx           bool                // skip sending transaction on chain, this can set to true only if the data has already settled on chain before
 	FastMode         bool                // skip waiting for receipt and upload segments by root (recommended for small files)
-	Fee              *big.Int            // fee in neuron
-	Nonce            *big.Int            // nonce for transaction
-	MaxGasPrice      *big.Int            // max gas price for transaction
-	NRetries         int                 // number of retries for uploading
-	Step             int64               // step for uploading
-	Method           string              // method for selecting nodes, can be "max", "random" or certain positive number in string
-	FullTrusted      bool                // whether to use full trusted nodes
-	EncryptionKey    []byte              // optional 32-byte AES-256 encryption key; when set, data is encrypted before upload
+
+	// Node selection
+	Method      string // method for selecting nodes, can be "max", "min", "random" or certain positive number in string
+	FullTrusted bool   // whether to use full trusted nodes
+
+	// Split / batch
+	FragmentSize int64 // size of fragment when splitting large files (0 = default 4GiB)
+	BatchSize    uint  // number of fragments to submit in a single batch (default 10)
 }
 
 // SubmitLogEntryOption option for submitting log entry
 type SubmitLogEntryOption struct {
-	Submitter   common.Address // address of the transaction sender
-	Fee         *big.Int
-	Nonce       *big.Int
-	MaxGasPrice *big.Int
-	NRetries    int
-	Step        int64
+	TransactionOption
 	WaitReceipt *bool
 }
 
@@ -175,7 +186,14 @@ func (uploader *Uploader) wrapEncryption(data core.IterableData, opt UploadOptio
 }
 
 // SplitableUpload submit data to 0g storage contract and large data will be splited to reduce padding cost.
-func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.IterableData, fragmentSize int64, option ...UploadOption) ([]common.Hash, []common.Hash, error) {
+func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.IterableData, option ...UploadOption) ([]common.Hash, []common.Hash, error) {
+	var opt UploadOption
+	if len(option) > 0 {
+		opt = option[0]
+	}
+	normalizeUploadOption(&opt)
+
+	fragmentSize := opt.FragmentSize
 	if fragmentSize < core.DefaultChunkSize {
 		fragmentSize = core.DefaultChunkSize
 	}
@@ -187,12 +205,6 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 		fragmentSize = int64(aligned)
 	}
 	uploader.logger.Infof("fragment size: %v", fragmentSize)
-
-	var opt UploadOption
-	if len(option) > 0 {
-		opt = option[0]
-	}
-	normalizeUploadOption(&opt)
 
 	// Wrap data with encryption BEFORE splitting so that the encrypted stream
 	// (including the 17-byte header) is what gets fragmented. This ensures the
@@ -213,26 +225,37 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 		txHashes = append(txHashes, txHash)
 		rootHashes = append(rootHashes, rootHash)
 	} else {
+		totalSize := data.Size()
 		fragments := data.Split(fragmentSize)
 		uploader.logger.Infof("splitted origin file into %v fragments, %v bytes each.", len(fragments), fragmentSize)
-		for l := 0; l < len(fragments); l += int(defaultBatchSize) {
-			r := min(l+int(defaultBatchSize), len(fragments))
+		for l := 0; l < len(fragments); l += int(opt.BatchSize) {
+			r := min(l+int(opt.BatchSize), len(fragments))
 			uploader.logger.Infof("batch submitting fragments %v to %v...", l, r)
-			opts := BatchUploadOption{
-				Submitter:   opt.Submitter,
-				Fee:         nil,
-				Nonce:       nil,
-				MaxGasPrice: opt.MaxGasPrice,
-				NRetries:    opt.NRetries,
-				Step:        opt.Step,
-				DataOptions: make([]UploadOption, 0),
-				Method:      opt.Method,
-				FullTrusted: opt.FullTrusted,
+
+			txOpt := opt.TransactionOption
+			txOpt.Nonce = nil // auto per batch
+			if txOpt.Fee != nil {
+				// proportional fee for this batch based on data size
+				var batchDataSize int64
+				for i := l; i < r; i++ {
+					batchDataSize += fragments[i].Size()
+				}
+				txOpt.Fee = new(big.Int).Div(
+					new(big.Int).Mul(opt.Fee, big.NewInt(batchDataSize)),
+					big.NewInt(totalSize),
+				)
 			}
-			for i := l; i < r; i += 1 {
-				opts.DataOptions = append(opts.DataOptions, opt)
+
+			batchOpt := BatchUploadOption{
+				TransactionOption: txOpt,
+				DataOptions:       make([]UploadOption, 0, r-l),
+				Method:            opt.Method,
+				FullTrusted:       opt.FullTrusted,
 			}
-			txHash, roots, err := uploader.BatchUpload(ctx, fragments[l:r], opts)
+			for i := l; i < r; i++ {
+				batchOpt.DataOptions = append(batchOpt.DataOptions, opt)
+			}
+			txHash, roots, err := uploader.BatchUpload(ctx, fragments[l:r], batchOpt)
 			if err != nil {
 				return txHashes, rootHashes, err
 			}
@@ -251,6 +274,12 @@ func normalizeUploadOption(opt *UploadOption) {
 	}
 	if opt.Tags == nil {
 		opt.Tags = []byte{}
+	}
+	if opt.FragmentSize == 0 {
+		opt.FragmentSize = defaultFragmentSize
+	}
+	if opt.BatchSize == 0 {
+		opt.BatchSize = defaultBatchSize
 	}
 }
 
@@ -469,13 +498,8 @@ func (uploader *Uploader) submitLogEntryNoReceipt(ctx context.Context, data core
 	waitReceipt := false
 	receiptFlag := waitReceipt
 	submitOpts := SubmitLogEntryOption{
-		Submitter:   opt.Submitter,
-		Fee:         opt.Fee,
-		Nonce:       opt.Nonce,
-		MaxGasPrice: opt.MaxGasPrice,
-		NRetries:    opt.NRetries,
-		Step:        opt.Step,
-		WaitReceipt: &receiptFlag,
+		TransactionOption: opt.TransactionOption,
+		WaitReceipt:       &receiptFlag,
 	}
 	txHash, _, err := uploader.SubmitLogEntry(ctx, []core.IterableData{data}, [][]byte{opt.Tags}, submitOpts)
 	if err != nil {
@@ -488,13 +512,8 @@ func (uploader *Uploader) submitLogEntryAndWait(ctx context.Context, data core.I
 	waitReceipt := true
 	receiptFlag := waitReceipt
 	submitOpts := SubmitLogEntryOption{
-		Submitter:   opt.Submitter,
-		Fee:         opt.Fee,
-		Nonce:       opt.Nonce,
-		MaxGasPrice: opt.MaxGasPrice,
-		NRetries:    opt.NRetries,
-		Step:        opt.Step,
-		WaitReceipt: &receiptFlag,
+		TransactionOption: opt.TransactionOption,
+		WaitReceipt:       &receiptFlag,
 	}
 
 	txHash, receipt, err := uploader.SubmitLogEntry(ctx, []core.IterableData{data}, [][]byte{opt.Tags}, submitOpts)
