@@ -2,10 +2,10 @@
 
 Go implementation for client to interact with storage nodes in 0G Storage network. For more details, please read the [docs](https://docs.0g.ai/developer-hub/building-on-0g/storage/sdk).
 
-[![API Reference](https://pkg.go.dev/badge/github.com/0glabs/0g-storage-client)](https://pkg.go.dev/github.com/0glabs/0g-storage-client)
-[![Go Report Card](https://goreportcard.com/badge/github.com/0glabs/0g-storage-client)](https://goreportcard.com/report/github.com/0glabs/0g-storage-client)
-[![Github Action Workflow](https://github.com/0glabs/0g-storage-client/actions/workflows/go.yml/badge.svg)](https://github.com/0glabs/0g-storage-client/actions/workflows/go.yml)
-[![Github Action Workflow](https://github.com/0glabs/0g-storage-client/actions/workflows/tests.yml/badge.svg)](https://github.com/0glabs/0g-storage-client/actions/workflows/tests.yml)
+[![API Reference](https://pkg.go.dev/badge/github.com/0gfoundation/0g-storage-client)](https://pkg.go.dev/github.com/0gfoundation/0g-storage-client)
+[![Go Report Card](https://goreportcard.com/badge/github.com/0gfoundation/0g-storage-client)](https://goreportcard.com/report/github.com/0gfoundation/0g-storage-client)
+[![Github Action Workflow](https://github.com/0gfoundation/0g-storage-client/actions/workflows/go.yml/badge.svg)](https://github.com/0gfoundation/0g-storage-client/actions/workflows/go.yml)
+[![Github Action Workflow](https://github.com/0gfoundation/0g-storage-client/actions/workflows/tests.yml/badge.svg)](https://github.com/0gfoundation/0g-storage-client/actions/workflows/tests.yml)
 
 ## SDK
 
@@ -201,7 +201,7 @@ There are two options for uploading:
     }
     ```
 
-> **Note:** The `proof` field should contain a [`merkle.Proof`](https://github.com/0glabs/0g-storage-client/blob/8780c5020928a79fb60ed7dea26a42d9876ecfae/core/merkle/proof.go#L20) object, which is used to verify the integrity of each segment.
+> **Note:** The `proof` field should contain a [`merkle.Proof`](https://github.com/0gfoundation/0g-storage-client/blob/8780c5020928a79fb60ed7dea26a42d9876ecfae/core/merkle/proof.go#L20) object, which is used to verify the integrity of each segment.
 
 ### Query File Info
 
