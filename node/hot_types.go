@@ -34,22 +34,6 @@ type HotRouterServiceResponse struct {
 
 // HotDownloadResponse is the response from the hot storage node's hot_download RPC method.
 type HotDownloadResponse struct {
-	Data   *string `json:"data"`
-	FeeWei string  `json:"feeWei"`
+	Data   string `json:"data"`
+	FeeWei string `json:"feeWei"`
 }
-
-// HotPrefetchResponse is the response from the hot storage node's hot_prefetch RPC method.
-type HotPrefetchResponse struct {
-	Accepted        bool `json:"accepted"`
-	AlreadyCached   bool `json:"alreadyCached"`
-	FetchInProgress bool `json:"fetchInProgress"`
-}
-
-// HotCacheStatus represents the cache status of a file on a hot storage node.
-type HotCacheStatus string
-
-const (
-	HotCacheStatusFullyCached     HotCacheStatus = "FullyCached"
-	HotCacheStatusFetchInProgress HotCacheStatus = "FetchInProgress"
-	HotCacheStatusNotCached       HotCacheStatus = "NotCached"
-)

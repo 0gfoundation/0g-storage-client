@@ -136,13 +136,25 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 	assert.Equal(t, "0xabcdef", resp.Signature)
 }
 
+func TestGetDownloadAuth_CacheMiss_404(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "file not cached", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	key := generateTestKey(t)
+	client := NewHotRouterClient(server.URL)
+	resp, err := client.GetDownloadAuth(context.Background(), key, "0xaaaa")
+	require.NoError(t, err)
+	assert.Nil(t, resp)
+}
+
 func TestGetDownloadAuth_RouterError(t *testing.T) {
 	tests := []struct {
 		name       string
 		statusCode int
 		body       string
 	}{
-		{"not found", http.StatusNotFound, "file not found"},
 		{"insufficient balance", http.StatusPaymentRequired, "insufficient balance"},
 		{"unauthorized", http.StatusUnauthorized, "signature does not match user"},
 		{"server error", http.StatusInternalServerError, "internal error"},

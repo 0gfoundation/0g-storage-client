@@ -87,6 +87,11 @@ func (c *HotRouterClient) GetDownloadAuth(ctx context.Context, privateKey *ecdsa
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
+	if resp.StatusCode == http.StatusNotFound {
+		// 404 means no hot node has the file cached; router triggers prefetch server-side.
+		return nil, nil
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("router returned status %d: %s", resp.StatusCode, string(respBody))
 	}

@@ -44,36 +44,23 @@ func (m *mockFallbackDownloader) DownloadFragments(ctx context.Context, roots []
 	return nil
 }
 
-// newTestRouterServer creates a test HTTP server that mimics the hot storage router.
-// If fileData is non-nil, the "hot node" will return data (cache hit). If nil, cache miss.
-func newTestRouterAndNode(t *testing.T, fileData []byte) (*httptest.Server, *httptest.Server) {
+// newTestHotNode creates a mock hot storage node JSON-RPC server.
+func newTestHotNode(t *testing.T, fileData []byte) *httptest.Server {
 	t.Helper()
-
-	// Hot node JSON-RPC server.
-	hotNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var rpcReq struct {
-			Method string                 `json:"method"`
-			Params map[string]interface{} `json:"params"`
-			ID     interface{}            `json:"id"`
+			Method string      `json:"method"`
+			ID     interface{} `json:"id"`
 		}
 		json.NewDecoder(r.Body).Decode(&rpcReq)
 
 		w.Header().Set("Content-Type", "application/json")
 
-		switch rpcReq.Method {
-		case "hot_download":
-			var result node.HotDownloadResponse
-			if fileData != nil {
-				encoded := base64.StdEncoding.EncodeToString(fileData)
-				result = node.HotDownloadResponse{
-					Data:   &encoded,
-					FeeWei: "1000",
-				}
-			} else {
-				result = node.HotDownloadResponse{
-					Data:   nil,
-					FeeWei: "0",
-				}
+		if rpcReq.Method == "hot_download" {
+			encoded := base64.StdEncoding.EncodeToString(fileData)
+			result := node.HotDownloadResponse{
+				Data:   encoded,
+				FeeWei: "1000",
 			}
 			resp := map[string]interface{}{
 				"jsonrpc": "2.0",
@@ -81,37 +68,35 @@ func newTestRouterAndNode(t *testing.T, fileData []byte) (*httptest.Server, *htt
 				"result":  result,
 			}
 			json.NewEncoder(w).Encode(resp)
-
-		case "hot_prefetch":
-			resp := map[string]interface{}{
-				"jsonrpc": "2.0",
-				"id":      rpcReq.ID,
-				"result": node.HotPrefetchResponse{
-					Accepted:        true,
-					AlreadyCached:   false,
-					FetchInProgress: false,
-				},
-			}
-			json.NewEncoder(w).Encode(resp)
-
-		default:
-			resp := map[string]interface{}{
-				"jsonrpc": "2.0",
-				"id":      rpcReq.ID,
-				"error":   map[string]interface{}{"code": -32601, "message": "method not found"},
-			}
-			json.NewEncoder(w).Encode(resp)
+			return
 		}
-	}))
 
-	// Router HTTP server.
-	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      rpcReq.ID,
+			"error":   map[string]interface{}{"code": -32601, "message": "method not found"},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+// newTestRouter creates a mock router. If hotNodeURL is non-empty, it returns that node (cache hit).
+// If empty, it returns 404 (cache miss).
+func newTestRouter(t *testing.T, hotNodeURL string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/download" && r.Method == http.MethodPost {
+			if hotNodeURL == "" {
+				// Cache miss — router returns 404 and handles prefetch server-side.
+				http.Error(w, "file not cached", http.StatusNotFound)
+				return
+			}
+
 			var req node.HotRouterDownloadRequest
 			json.NewDecoder(r.Body).Decode(&req)
 
 			resp := node.HotRouterDownloadResponse{
-				NodeURL:   hotNode.URL,
+				NodeURL:   hotNodeURL,
 				Provider:  "0x1111111111111111111111111111111111111111",
 				FileHash:  req.FileHash,
 				MaxFee:    "1000000",
@@ -124,15 +109,14 @@ func newTestRouterAndNode(t *testing.T, fileData []byte) (*httptest.Server, *htt
 		}
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
-
-	return router, hotNode
 }
 
 func TestHotDownloader_CacheHit(t *testing.T) {
 	fileContent := []byte("hello hot storage world")
-	router, hotNode := newTestRouterAndNode(t, fileContent)
-	defer router.Close()
+	hotNode := newTestHotNode(t, fileContent)
 	defer hotNode.Close()
+	router := newTestRouter(t, hotNode.URL)
+	defer router.Close()
 
 	key := testKey(t)
 	routerClient := node.NewHotRouterClient(router.URL)
@@ -160,9 +144,8 @@ func TestHotDownloader_CacheHit(t *testing.T) {
 }
 
 func TestHotDownloader_CacheMiss_FallbackCalled(t *testing.T) {
-	router, hotNode := newTestRouterAndNode(t, nil) // nil = cache miss
+	router := newTestRouter(t, "") // empty = 404 cache miss
 	defer router.Close()
-	defer hotNode.Close()
 
 	key := testKey(t)
 	routerClient := node.NewHotRouterClient(router.URL)
@@ -219,13 +202,11 @@ func TestHotDownloader_RouterDown_FallbackCalled(t *testing.T) {
 
 func TestHotDownloader_DownloadFragments_AllCached(t *testing.T) {
 	frag1 := []byte("fragment one data")
-	frag2 := []byte("fragment two data")
 
-	// We need different data per root, so use a simple approach:
-	// Both fragments return the same data for simplicity in this test.
-	router, hotNode := newTestRouterAndNode(t, frag1)
-	defer router.Close()
+	hotNode := newTestHotNode(t, frag1)
 	defer hotNode.Close()
+	router := newTestRouter(t, hotNode.URL)
+	defer router.Close()
 
 	key := testKey(t)
 	routerClient := node.NewHotRouterClient(router.URL)
@@ -234,7 +215,7 @@ func TestHotDownloader_DownloadFragments_AllCached(t *testing.T) {
 	fallback := &mockFallbackDownloader{
 		downloadFunc: func(ctx context.Context, root, filename string, withProof bool) error {
 			fallbackCalled = true
-			return os.WriteFile(filename, frag2, 0644)
+			return nil
 		},
 	}
 
@@ -259,11 +240,10 @@ func TestHotDownloader_DownloadFragments_AllCached(t *testing.T) {
 	assert.Equal(t, expected, data)
 }
 
-func TestHotDownloader_DownloadFragments_MixedCacheMiss(t *testing.T) {
-	// Router/node that always returns cache miss.
-	router, hotNode := newTestRouterAndNode(t, nil)
+func TestHotDownloader_DownloadFragments_AllCacheMiss(t *testing.T) {
+	// Router returns 404 for all fragments.
+	router := newTestRouter(t, "")
 	defer router.Close()
-	defer hotNode.Close()
 
 	key := testKey(t)
 	routerClient := node.NewHotRouterClient(router.URL)
@@ -317,9 +297,10 @@ func TestHotDownloader_CacheHit_LargeFile(t *testing.T) {
 		fileContent[i] = byte(i % 256)
 	}
 
-	router, hotNode := newTestRouterAndNode(t, fileContent)
-	defer router.Close()
+	hotNode := newTestHotNode(t, fileContent)
 	defer hotNode.Close()
+	router := newTestRouter(t, hotNode.URL)
+	defer router.Close()
 
 	key := testKey(t)
 	routerClient := node.NewHotRouterClient(router.URL)

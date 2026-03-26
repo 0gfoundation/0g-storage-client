@@ -176,15 +176,27 @@ func (d *HotDownloader) downloadFragmentData(ctx context.Context, root string, i
 }
 
 // tryHotDownload attempts to download a file from hot storage.
-// Returns (data, nil) on cache hit, (nil, nil) on cache miss (after prefetch), or (nil, err) on failure.
+// Returns (data, nil) on cache hit, (nil, nil) on cache miss, or (nil, err) on failure.
 func (d *HotDownloader) tryHotDownload(ctx context.Context, root string) ([]byte, error) {
-	// Step 1: Get download auth from router.
+	d.logger.WithField("root", root).Info("Attempting hot storage download")
+
+	// Step 1: Ask router which hot node has the file.
 	auth, err := d.routerClient.GetDownloadAuth(ctx, d.privateKey, root)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get download auth from router: %w", err)
 	}
+	if auth == nil {
+		// Router returned 404 — no hot node has the file cached.
+		d.logger.WithField("root", root).Info("File not available in hot storage")
+		return nil, nil
+	}
+	d.logger.WithFields(logrus.Fields{
+		"root":     root,
+		"node_url": auth.NodeURL,
+		"provider": auth.Provider,
+	}).Info("Got download auth from router")
 
-	// Step 2: Connect to hot storage node and download.
+	// Step 2: Download from the assigned hot node.
 	hotClient, err := node.NewHotClient(auth.NodeURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to hot storage node %s: %w", auth.NodeURL, err)
@@ -197,21 +209,16 @@ func (d *HotDownloader) tryHotDownload(ctx context.Context, root string) ([]byte
 		return nil, fmt.Errorf("hot_download RPC failed: %w", err)
 	}
 
-	// Step 3: Check if data is present (cache hit) or null (cache miss).
-	if resp.Data == nil {
-		// Cache miss — prefetch for future requests.
-		d.logger.WithField("root", root).Info("Hot storage cache miss, sending prefetch request")
-		if _, prefetchErr := hotClient.Prefetch(ctx, root); prefetchErr != nil {
-			d.logger.WithError(prefetchErr).Warn("Prefetch request failed")
-		}
-		return nil, nil
-	}
-
 	// Decode base64 data.
-	data, err := base64.StdEncoding.DecodeString(*resp.Data)
+	data, err := base64.StdEncoding.DecodeString(resp.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64 data: %w", err)
 	}
+
+	d.logger.WithFields(logrus.Fields{
+		"root": root,
+		"size": len(data),
+	}).Info("Hot storage cache hit, downloaded successfully")
 
 	return data, nil
 }

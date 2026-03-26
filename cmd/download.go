@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/0gfoundation/0g-storage-client/common"
@@ -178,6 +179,8 @@ func mustDecodeEncryptionKey(hexKey string) []byte {
 }
 
 func mustParsePrivateKey(hexKey string) *ecdsa.PrivateKey {
+	hexKey = strings.TrimPrefix(hexKey, "0x")
+	hexKey = strings.TrimPrefix(hexKey, "0X")
 	key, err := crypto.HexToECDSA(hexKey)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to parse private key")
