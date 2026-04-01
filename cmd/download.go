@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/0gfoundation/0g-storage-client/common"
@@ -10,6 +12,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -19,6 +22,9 @@ type downloadArgument struct {
 
 	indexer string
 	nodes   []string
+
+	hotRouter  string
+	privateKey string
 
 	root  string
 	roots []string
@@ -37,7 +43,9 @@ func bindDownloadFlags(cmd *cobra.Command, args *downloadArgument) {
 
 	cmd.Flags().StringSliceVar(&args.nodes, "node", []string{}, "ZeroGStorage storage node URL. Multiple nodes could be specified and separated by comma, e.g. url1,url2,url3")
 	cmd.Flags().StringVar(&args.indexer, "indexer", "", "ZeroGStorage indexer URL")
-	cmd.MarkFlagsOneRequired("indexer", "node")
+
+	cmd.Flags().StringVar(&args.hotRouter, "hot-router", "", "Hot storage router URL for fast download")
+	cmd.Flags().StringVar(&args.privateKey, "private-key", "", "User's private key for signing hot storage download requests")
 
 	cmd.Flags().StringVar(&args.root, "root", "", "Merkle root to download file")
 	cmd.Flags().StringSliceVar(&args.roots, "roots", []string{}, "Merkle roots to download fragments")
@@ -77,10 +85,25 @@ func download(*cobra.Command, []string) {
 		defer cancel()
 	}
 
+	// Validate flag combinations.
+	if downloadArgs.hotRouter != "" {
+		if downloadArgs.privateKey == "" {
+			logrus.Fatal("--private-key is required when using --hot-router")
+		}
+		if downloadArgs.indexer == "" && len(downloadArgs.nodes) == 0 {
+			logrus.Fatal("--indexer or --node is required as fallback when using --hot-router")
+		}
+	} else if downloadArgs.indexer == "" && len(downloadArgs.nodes) == 0 {
+		logrus.Fatal("one of --indexer, --node, or --hot-router is required")
+	}
+
 	var (
 		downloader transfer.IDownloader
 		closer     func()
 	)
+
+	// Build the base downloader (used directly or as fallback for hot storage).
+	var baseDownloader transfer.IDownloader
 	if downloadArgs.indexer != "" {
 		indexerClient, err := indexer.NewClient(downloadArgs.indexer, indexer.IndexerClientOption{
 			FullTrusted:    false,
@@ -91,18 +114,12 @@ func download(*cobra.Command, []string) {
 			logrus.WithError(err).Fatal("Failed to initialize indexer client")
 		}
 		defer indexerClient.Close()
-		if downloadArgs.encryptionKey != "" {
-			keyBytes, err := hexutil.Decode(downloadArgs.encryptionKey)
-			if err != nil {
-				logrus.WithError(err).Fatal("Failed to decode encryption key")
-			}
-			if len(keyBytes) != 32 {
-				logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
-			}
+		if downloadArgs.encryptionKey != "" && downloadArgs.hotRouter == "" {
+			keyBytes := mustDecodeEncryptionKey(downloadArgs.encryptionKey)
 			indexerClient.WithEncryptionKey(keyBytes)
 		}
-		downloader = indexerClient
-	} else {
+		baseDownloader = indexerClient
+	} else if len(downloadArgs.nodes) > 0 {
 		clients := node.MustNewZgsClients(downloadArgs.nodes, nil, providerOption)
 		closer = func() {
 			for _, client := range clients {
@@ -111,24 +128,32 @@ func download(*cobra.Command, []string) {
 		}
 		downloaderImpl, err := transfer.NewDownloader(clients, common.LogOption{Logger: logrus.StandardLogger()})
 		if err != nil {
-			closer()
+			if closer != nil {
+				closer()
+			}
 			logrus.WithError(err).Fatal("Failed to initialize downloader")
 		}
 		downloaderImpl.WithRoutines(downloadArgs.routines)
-		if downloadArgs.encryptionKey != "" {
-			keyBytes, err := hexutil.Decode(downloadArgs.encryptionKey)
-			if err != nil {
-				closer()
-				logrus.WithError(err).Fatal("Failed to decode encryption key")
-			}
-			if len(keyBytes) != 32 {
-				closer()
-				logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
-			}
+		if downloadArgs.encryptionKey != "" && downloadArgs.hotRouter == "" {
+			keyBytes := mustDecodeEncryptionKey(downloadArgs.encryptionKey)
 			downloaderImpl.WithEncryptionKey(keyBytes)
 		}
-		downloader = downloaderImpl
+		baseDownloader = downloaderImpl
 		defer closer()
+	}
+
+	// Build the hot downloader if hot-router is specified.
+	if downloadArgs.hotRouter != "" {
+		privateKey := mustParsePrivateKey(downloadArgs.privateKey)
+		routerClient := node.NewHotRouterClient(downloadArgs.hotRouter)
+		hotDownloader := transfer.NewHotDownloader(routerClient, privateKey, baseDownloader, common.LogOption{Logger: logrus.StandardLogger()})
+		if downloadArgs.encryptionKey != "" {
+			keyBytes := mustDecodeEncryptionKey(downloadArgs.encryptionKey)
+			hotDownloader.WithEncryptionKey(keyBytes)
+		}
+		downloader = hotDownloader
+	} else {
+		downloader = baseDownloader
 	}
 
 	if downloadArgs.root != "" {
@@ -140,4 +165,25 @@ func download(*cobra.Command, []string) {
 			logrus.WithError(err).Fatal("Failed to download file")
 		}
 	}
+}
+
+func mustDecodeEncryptionKey(hexKey string) []byte {
+	keyBytes, err := hexutil.Decode(hexKey)
+	if err != nil {
+		logrus.WithError(err).Fatal("Failed to decode encryption key")
+	}
+	if len(keyBytes) != 32 {
+		logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
+	}
+	return keyBytes
+}
+
+func mustParsePrivateKey(hexKey string) *ecdsa.PrivateKey {
+	hexKey = strings.TrimPrefix(hexKey, "0x")
+	hexKey = strings.TrimPrefix(hexKey, "0X")
+	key, err := crypto.HexToECDSA(hexKey)
+	if err != nil {
+		logrus.WithError(err).Fatal("Failed to parse private key")
+	}
+	return key
 }
