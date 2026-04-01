@@ -18,9 +18,11 @@ if __name__ == "__main__":
         test_dir=os.path.dirname(__file__),
         slow_tests={
             "cli_file_upload_download_test.py",
-            "cli_file_encrypted_upload_download_test.py",
             "cli_encrypted_splitable_upload_test.py",
             "cli_dir_test.py",
+        },
+        single_run_tests={
+            "cli_file_encrypted_upload_download_test.py"
         },
         long_manual_tests={},
         skip_tests={},
