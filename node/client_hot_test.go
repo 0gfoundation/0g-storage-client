@@ -1,8 +1,8 @@
 package node
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,47 +23,20 @@ func TestNewHotClient_ValidURL(t *testing.T) {
 	client.Close()
 }
 
-// newMockHotNode creates a test JSON-RPC server that handles hot storage methods.
-func newMockHotNode(t *testing.T, handler func(method string, params json.RawMessage) (interface{}, *jsonRPCError)) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Method string          `json:"method"`
-			Params json.RawMessage `json:"params"`
-			ID     interface{}     `json:"id"`
-		}
-		json.NewDecoder(r.Body).Decode(&req)
-
-		w.Header().Set("Content-Type", "application/json")
-
-		result, rpcErr := handler(req.Method, req.Params)
-		resp := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      req.ID,
-		}
-		if rpcErr != nil {
-			resp["error"] = rpcErr
-		} else {
-			resp["result"] = result
-		}
-		json.NewEncoder(w).Encode(resp)
-	}))
-}
-
-type jsonRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
 func TestHotDownload_Success(t *testing.T) {
-	encoded := "aGVsbG8=" // base64("hello")
-	server := newMockHotNode(t, func(method string, params json.RawMessage) (interface{}, *jsonRPCError) {
-		assert.Equal(t, "hot_download", method)
-		return &HotDownloadResponse{
-			Data:   encoded,
-			FeeWei: "500",
-		}, nil
-	})
+	fileData := []byte("hello world")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/download", r.URL.Path)
+		assert.Equal(t, "0xuser", r.URL.Query().Get("user"))
+		assert.Equal(t, "0xabcd", r.URL.Query().Get("file_hash"))
+		assert.Equal(t, "0xabcd", r.URL.Query().Get("file_hashes"))
+		assert.Equal(t, "1000", r.URL.Query().Get("max_fee"))
+		assert.Equal(t, "1", r.URL.Query().Get("nonce"))
+		assert.Equal(t, "0xdeadbeef", r.URL.Query().Get("signature"))
+		w.WriteHeader(http.StatusOK)
+		w.Write(fileData)
+	}))
 	defer server.Close()
 
 	client, err := NewHotClient(server.URL)
@@ -71,23 +44,23 @@ func TestHotDownload_Success(t *testing.T) {
 	defer client.Close()
 
 	auth := &HotRouterDownloadResponse{
-		NodeURL:   server.URL,
-		Provider:  "0x1111",
-		FileHash:  "0xabcd",
-		MaxFee:    "1000",
-		Nonce:     1,
-		Signature: "0xdeadbeef",
+		NodeURL:    server.URL,
+		Provider:   "0x1111",
+		FileHashes: []string{"0xabcd"},
+		MaxFee:     "1000",
+		Nonce:      1,
+		Signature:  "0xdeadbeef",
 	}
-	resp, err := client.HotDownload(context.Background(), "0xuser", auth)
+	var buf bytes.Buffer
+	err = client.HotDownload(context.Background(), "0xuser", auth, "0xabcd", &buf)
 	require.NoError(t, err)
-	assert.Equal(t, encoded, resp.Data)
-	assert.Equal(t, "500", resp.FeeWei)
+	assert.Equal(t, fileData, buf.Bytes())
 }
 
-func TestHotDownload_RPCError(t *testing.T) {
-	server := newMockHotNode(t, func(method string, params json.RawMessage) (interface{}, *jsonRPCError) {
-		return nil, &jsonRPCError{Code: -32000, Message: "internal error"}
-	})
+func TestHotDownload_NodeError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
 	defer server.Close()
 
 	client, err := NewHotClient(server.URL)
@@ -95,20 +68,22 @@ func TestHotDownload_RPCError(t *testing.T) {
 	defer client.Close()
 
 	auth := &HotRouterDownloadResponse{
-		NodeURL:   server.URL,
-		FileHash:  "0xabcd",
-		MaxFee:    "1000",
-		Nonce:     1,
-		Signature: "0xdeadbeef",
+		NodeURL:    server.URL,
+		FileHashes: []string{"0xabcd"},
+		MaxFee:     "1000",
+		Nonce:      1,
+		Signature:  "0xdeadbeef",
 	}
-	_, err = client.HotDownload(context.Background(), "0xuser", auth)
+	var buf bytes.Buffer
+	err = client.HotDownload(context.Background(), "0xuser", auth, "0xabcd", &buf)
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "401")
 }
 
 func TestHotDownload_ContextCanceled(t *testing.T) {
-	server := newMockHotNode(t, func(method string, params json.RawMessage) (interface{}, *jsonRPCError) {
-		return &HotDownloadResponse{Data: "data", FeeWei: "0"}, nil
-	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
 	defer server.Close()
 
 	client, err := NewHotClient(server.URL)
@@ -119,12 +94,37 @@ func TestHotDownload_ContextCanceled(t *testing.T) {
 	cancel()
 
 	auth := &HotRouterDownloadResponse{
-		NodeURL:   server.URL,
-		FileHash:  "0xabcd",
-		MaxFee:    "1000",
-		Nonce:     1,
-		Signature: "0xdeadbeef",
+		NodeURL:    server.URL,
+		FileHashes: []string{"0xabcd"},
+		MaxFee:     "1000",
+		Nonce:      1,
+		Signature:  "0xdeadbeef",
 	}
-	_, err = client.HotDownload(ctx, "0xuser", auth)
+	var buf bytes.Buffer
+	err = client.HotDownload(ctx, "0xuser", auth, "0xabcd", &buf)
 	assert.Error(t, err)
+}
+
+func TestHotDownload_MultipleFileHashes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "0xfrag1", r.URL.Query().Get("file_hash"))
+		assert.Equal(t, "0xfrag1,0xfrag2,0xfrag3", r.URL.Query().Get("file_hashes"))
+		w.Write([]byte("fragment data"))
+	}))
+	defer server.Close()
+
+	client, err := NewHotClient(server.URL)
+	require.NoError(t, err)
+
+	auth := &HotRouterDownloadResponse{
+		NodeURL:    server.URL,
+		FileHashes: []string{"0xfrag1", "0xfrag2", "0xfrag3"},
+		MaxFee:     "3000",
+		Nonce:      2,
+		Signature:  "0xsig",
+	}
+	var buf bytes.Buffer
+	err = client.HotDownload(context.Background(), "0xuser", auth, "0xfrag1", &buf)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("fragment data"), buf.Bytes())
 }

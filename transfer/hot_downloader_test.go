@@ -3,7 +3,6 @@ package transfer
 import (
 	"context"
 	"crypto/ecdsa"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -44,39 +43,16 @@ func (m *mockFallbackDownloader) DownloadFragments(ctx context.Context, roots []
 	return nil
 }
 
-// newTestHotNode creates a mock hot storage node JSON-RPC server.
+// newTestHotNode creates a mock hot storage node HTTP server.
 func newTestHotNode(t *testing.T, fileData []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var rpcReq struct {
-			Method string      `json:"method"`
-			ID     interface{} `json:"id"`
-		}
-		json.NewDecoder(r.Body).Decode(&rpcReq)
-
-		w.Header().Set("Content-Type", "application/json")
-
-		if rpcReq.Method == "hot_download" {
-			encoded := base64.StdEncoding.EncodeToString(fileData)
-			result := node.HotDownloadResponse{
-				Data:   encoded,
-				FeeWei: "1000",
-			}
-			resp := map[string]interface{}{
-				"jsonrpc": "2.0",
-				"id":      rpcReq.ID,
-				"result":  result,
-			}
-			json.NewEncoder(w).Encode(resp)
+		if r.Method == http.MethodGet && r.URL.Path == "/download" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(fileData)
 			return
 		}
-
-		resp := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      rpcReq.ID,
-			"error":   map[string]interface{}{"code": -32601, "message": "method not found"},
-		}
-		json.NewEncoder(w).Encode(resp)
+		http.Error(w, "not found", http.StatusNotFound)
 	}))
 }
 
@@ -96,12 +72,12 @@ func newTestRouter(t *testing.T, hotNodeURL string) *httptest.Server {
 			json.NewDecoder(r.Body).Decode(&req)
 
 			resp := node.HotRouterDownloadResponse{
-				NodeURL:   hotNodeURL,
-				Provider:  "0x1111111111111111111111111111111111111111",
-				FileHash:  req.FileHash,
-				MaxFee:    "1000000",
-				Nonce:     99999,
-				Signature: "0xdeadbeef",
+				NodeURL:    hotNodeURL,
+				Provider:   "0x1111111111111111111111111111111111111111",
+				FileHashes: req.FileHashes,
+				MaxFee:     "1000000",
+				Nonce:      99999,
+				Signature:  "0xdeadbeef",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)

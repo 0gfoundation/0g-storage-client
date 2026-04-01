@@ -31,11 +31,13 @@ func NewHotRouterClient(url string) *HotRouterClient {
 	}
 }
 
-// signDownloadRequest computes keccak256(user || fileHash || nonce) and signs it with the private key.
-func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, fileHash common.Hash, nonce uint64) ([]byte, error) {
-	data := make([]byte, 0, 20+32+32)
+// signDownloadRequest computes keccak256(user || fileHash1 || ... || fileHashN || nonce) and signs it.
+func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, fileHashes []common.Hash, nonce uint64) ([]byte, error) {
+	data := make([]byte, 0, 20+32*len(fileHashes)+32)
 	data = append(data, user.Bytes()...)
-	data = append(data, fileHash.Bytes()...)
+	for _, h := range fileHashes {
+		data = append(data, h.Bytes()...)
+	}
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
 
 	hash := crypto.Keccak256Hash(data)
@@ -47,22 +49,29 @@ func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, file
 }
 
 // GetDownloadAuth requests download authorization from the hot storage router.
-// It signs the request with the user's private key using a timestamp-based nonce.
-func (c *HotRouterClient) GetDownloadAuth(ctx context.Context, privateKey *ecdsa.PrivateKey, root string) (*HotRouterDownloadResponse, error) {
+// roots is the list of file root hashes to download (one or more fragments).
+// Returns nil, nil on 404 (no hot node has the file cached).
+func (c *HotRouterClient) GetDownloadAuth(ctx context.Context, privateKey *ecdsa.PrivateKey, roots []string) (*HotRouterDownloadResponse, error) {
 	user := crypto.PubkeyToAddress(privateKey.PublicKey)
-	fileHash := common.HexToHash(root)
 	nonce := uint64(time.Now().UnixMilli())
 
-	sig, err := signDownloadRequest(privateKey, user, fileHash, nonce)
+	fileHashes := make([]common.Hash, len(roots))
+	fileHashHexes := make([]string, len(roots))
+	for i, root := range roots {
+		fileHashes[i] = common.HexToHash(root)
+		fileHashHexes[i] = fileHashes[i].Hex()
+	}
+
+	sig, err := signDownloadRequest(privateKey, user, fileHashes, nonce)
 	if err != nil {
 		return nil, err
 	}
 
 	req := HotRouterDownloadRequest{
-		User:      user.Hex(),
-		FileHash:  fileHash.Hex(),
-		Nonce:     nonce,
-		Signature: fmt.Sprintf("0x%x", sig),
+		User:       user.Hex(),
+		FileHashes: fileHashHexes,
+		Nonce:      nonce,
+		Signature:  fmt.Sprintf("0x%x", sig),
 	}
 
 	body, err := json.Marshal(req)

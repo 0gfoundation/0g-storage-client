@@ -29,7 +29,7 @@ func TestSignDownloadRequest(t *testing.T) {
 	fileHash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 	nonce := uint64(1709913600001)
 
-	sig, err := signDownloadRequest(key, user, fileHash, nonce)
+	sig, err := signDownloadRequest(key, user, []common.Hash{fileHash}, nonce)
 	require.NoError(t, err)
 	assert.Len(t, sig, 65)
 
@@ -46,18 +46,42 @@ func TestSignDownloadRequest(t *testing.T) {
 	assert.Equal(t, user, recoveredAddr)
 }
 
+func TestSignDownloadRequest_MultipleHashes(t *testing.T) {
+	key := generateTestKey(t)
+	user := crypto.PubkeyToAddress(key.PublicKey)
+	hash1 := common.HexToHash("0x1111")
+	hash2 := common.HexToHash("0x2222")
+	nonce := uint64(42)
+
+	sig, err := signDownloadRequest(key, user, []common.Hash{hash1, hash2}, nonce)
+	require.NoError(t, err)
+	assert.Len(t, sig, 65)
+
+	// Verify.
+	data := make([]byte, 0, 20+32*2+32)
+	data = append(data, user.Bytes()...)
+	data = append(data, hash1.Bytes()...)
+	data = append(data, hash2.Bytes()...)
+	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
+	msgHash := crypto.Keccak256Hash(data)
+
+	pubKey, err := crypto.Ecrecover(msgHash.Bytes(), sig)
+	require.NoError(t, err)
+	recoveredAddr := common.BytesToAddress(crypto.Keccak256(pubKey[1:])[12:])
+	assert.Equal(t, user, recoveredAddr)
+}
+
 func TestSignDownloadRequest_DifferentNonces(t *testing.T) {
 	key := generateTestKey(t)
 	user := crypto.PubkeyToAddress(key.PublicKey)
 	fileHash := common.HexToHash("0xaaaa")
 
-	sig1, err := signDownloadRequest(key, user, fileHash, 1)
+	sig1, err := signDownloadRequest(key, user, []common.Hash{fileHash}, 1)
 	require.NoError(t, err)
 
-	sig2, err := signDownloadRequest(key, user, fileHash, 2)
+	sig2, err := signDownloadRequest(key, user, []common.Hash{fileHash}, 2)
 	require.NoError(t, err)
 
-	// Different nonces should produce different signatures.
 	assert.NotEqual(t, sig1, sig2)
 }
 
@@ -67,10 +91,10 @@ func TestSignDownloadRequest_DifferentKeys(t *testing.T) {
 	fileHash := common.HexToHash("0xbbbb")
 	nonce := uint64(100)
 
-	sig1, err := signDownloadRequest(key1, crypto.PubkeyToAddress(key1.PublicKey), fileHash, nonce)
+	sig1, err := signDownloadRequest(key1, crypto.PubkeyToAddress(key1.PublicKey), []common.Hash{fileHash}, nonce)
 	require.NoError(t, err)
 
-	sig2, err := signDownloadRequest(key2, crypto.PubkeyToAddress(key2.PublicKey), fileHash, nonce)
+	sig2, err := signDownloadRequest(key2, crypto.PubkeyToAddress(key2.PublicKey), []common.Hash{fileHash}, nonce)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, sig1, sig2)
@@ -90,6 +114,7 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, user.Hex(), req.User)
+		assert.Len(t, req.FileHashes, 1)
 		assert.NotEmpty(t, req.Signature)
 		assert.NotZero(t, req.Nonce)
 
@@ -98,7 +123,7 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, sigBytes, 65)
 
-		fileHash := common.HexToHash(req.FileHash)
+		fileHash := common.HexToHash(req.FileHashes[0])
 		data := make([]byte, 0, 20+32+32)
 		data = append(data, user.Bytes()...)
 		data = append(data, fileHash.Bytes()...)
@@ -111,12 +136,12 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 		assert.Equal(t, user, recoveredAddr)
 
 		resp := HotRouterDownloadResponse{
-			NodeURL:   "http://hot-node:6789",
-			Provider:  "0x1111111111111111111111111111111111111111",
-			FileHash:  req.FileHash,
-			MaxFee:    "1000000",
-			Nonce:     12345,
-			Signature: "0xabcdef",
+			NodeURL:    "http://hot-node:6789",
+			Provider:   "0x1111111111111111111111111111111111111111",
+			FileHashes: req.FileHashes,
+			MaxFee:     "1000000",
+			Nonce:      12345,
+			Signature:  "0xabcdef",
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -127,13 +152,43 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 	client := NewHotRouterClient(server.URL)
 	root := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
-	resp, err := client.GetDownloadAuth(context.Background(), key, root)
+	resp, err := client.GetDownloadAuth(context.Background(), key, []string{root})
 	require.NoError(t, err)
 	assert.Equal(t, "http://hot-node:6789", resp.NodeURL)
 	assert.Equal(t, "0x1111111111111111111111111111111111111111", resp.Provider)
 	assert.Equal(t, "1000000", resp.MaxFee)
 	assert.Equal(t, uint64(12345), resp.Nonce)
 	assert.Equal(t, "0xabcdef", resp.Signature)
+	assert.Equal(t, []string{common.HexToHash(root).Hex()}, resp.FileHashes)
+}
+
+func TestGetDownloadAuth_MultipleRoots(t *testing.T) {
+	key := generateTestKey(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req HotRouterDownloadRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		assert.Len(t, req.FileHashes, 3)
+
+		resp := HotRouterDownloadResponse{
+			NodeURL:    "http://hot-node:6789",
+			Provider:   "0x1111",
+			FileHashes: req.FileHashes,
+			MaxFee:     "3000000",
+			Nonce:      1,
+			Signature:  "0xsig",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewHotRouterClient(server.URL)
+	roots := []string{"0xaaaa", "0xbbbb", "0xcccc"}
+
+	resp, err := client.GetDownloadAuth(context.Background(), key, roots)
+	require.NoError(t, err)
+	assert.Len(t, resp.FileHashes, 3)
 }
 
 func TestGetDownloadAuth_CacheMiss_404(t *testing.T) {
@@ -144,7 +199,7 @@ func TestGetDownloadAuth_CacheMiss_404(t *testing.T) {
 
 	key := generateTestKey(t)
 	client := NewHotRouterClient(server.URL)
-	resp, err := client.GetDownloadAuth(context.Background(), key, "0xaaaa")
+	resp, err := client.GetDownloadAuth(context.Background(), key, []string{"0xaaaa"})
 	require.NoError(t, err)
 	assert.Nil(t, resp)
 }
@@ -169,7 +224,7 @@ func TestGetDownloadAuth_RouterError(t *testing.T) {
 
 			key := generateTestKey(t)
 			client := NewHotRouterClient(server.URL)
-			_, err := client.GetDownloadAuth(context.Background(), key, "0xaaaa")
+			_, err := client.GetDownloadAuth(context.Background(), key, []string{"0xaaaa"})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.body)
 		})
@@ -254,7 +309,6 @@ func TestGetService_NotFound(t *testing.T) {
 
 func TestGetDownloadAuth_ContextCanceled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate slow response — but context will be canceled.
 		<-r.Context().Done()
 	}))
 	defer server.Close()
@@ -263,9 +317,9 @@ func TestGetDownloadAuth_ContextCanceled(t *testing.T) {
 	client := NewHotRouterClient(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately.
+	cancel()
 
-	_, err := client.GetDownloadAuth(ctx, key, "0xaaaa")
+	_, err := client.GetDownloadAuth(ctx, key, []string{"0xaaaa"})
 	require.Error(t, err)
 }
 
@@ -279,7 +333,7 @@ func TestGetDownloadAuth_InvalidJSON(t *testing.T) {
 	key := generateTestKey(t)
 	client := NewHotRouterClient(server.URL)
 
-	_, err := client.GetDownloadAuth(context.Background(), key, "0xaaaa")
+	_, err := client.GetDownloadAuth(context.Background(), key, []string{"0xaaaa"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to decode router response")
 }
