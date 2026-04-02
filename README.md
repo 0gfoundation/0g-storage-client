@@ -68,6 +68,27 @@ Encrypt files client-side using AES-256-CTR before uploading. The encryption key
 
 If you want to verify the **merkle proof** of downloaded segment, please specify `--proof` option.
 
+**Download via Hot Storage (fast path)**
+
+Hot storage enables faster downloads by retrieving files from a pre-caching hot node selected by the router. On cache miss, the router triggers a prefetch server-side and the client automatically falls back to the regular download path.
+
+Prerequisites:
+- A hot storage router URL
+- Your private key for signing requests (with or without `0x` prefix)
+- A deposit made to the hot storage router (required for billing; 402 without deposit falls back automatically)
+- A fallback source (`--indexer` or `--node`) for cache misses
+
+```
+./0g-storage-client download \
+  --hot-router <hot_router_url> \
+  --private-key <hex_private_key> \
+  --indexer <storage_indexer_endpoint> \
+  --root <file_root_hash> \
+  --file <output_file_path>
+```
+
+For fragment downloads use `--roots` instead of `--root`. Combine with `--encryption-key` for encrypted files.
+
 **Encrypted upload with fragment splitting**
 
 Encryption works with `--fragment-size` for large files. The file is encrypted first, then split into fragments:
