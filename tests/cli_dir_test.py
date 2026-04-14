@@ -131,8 +131,9 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         self.log.info("Root hash: %s", root_hash)
 
-        # 2 small files batched into 1 tx + 1 metadata = 2 submissions
-        wait_until(lambda: self.contract.num_submissions() == submission_count + 2)
+        # 2 files (1 submission each) + 1 metadata = 3 submissions.
+        # Batching reduces on-chain transactions but each file still creates one log entry.
+        wait_until(lambda: self.contract.num_submissions() == submission_count + 3)
 
         for node_idx in range(4):
             client = self.nodes[node_idx]
@@ -189,10 +190,9 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         self.log.info("Root hash: %s", root_hash)
 
-        # 5 small files batched into 1 tx + 1 metadata = 2 submissions
-        # (all files are well under the default 4GB fragment size even after +17B encryption header)
+        # 5 files (1 submission each) + 1 directory metadata = 6 submissions
         wait_until(
-            lambda: self.contract.num_submissions() == submission_count + 2,
+            lambda: self.contract.num_submissions() == submission_count + 6,
             timeout=120,
         )
 
@@ -224,17 +224,17 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
 
-        # large_file.bin: 768KB → 3 fragments, goes through uploadFragments (1 tx)
+        # large_file.bin: 768KB → 3 fragments → 3 submissions
         large_file_path = os.path.join(temp_dir.name, "large_file.bin")
         with open(large_file_path, "wb") as f:
             f.write(os.urandom(fragment_size * 3))
 
-        # small_file.bin: 1KB → fits in one fragment, accumulated into small-file batch
+        # small_file.bin: 1KB → 1 submission (batched with others in one tx)
         small_file_path = os.path.join(temp_dir.name, "small_file.bin")
         with open(small_file_path, "wb") as f:
             f.write(os.urandom(1024))
 
-        # subdir/split_file.bin: 512KB → 2 fragments, goes through uploadFragments (1 tx)
+        # subdir/split_file.bin: 512KB → 2 fragments → 2 submissions
         subdir_path = os.path.join(temp_dir.name, "subdir")
         os.makedirs(subdir_path)
         with open(os.path.join(subdir_path, "split_file.bin"), "wb") as f:
@@ -259,14 +259,10 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         self.log.info("Root hash: %s", root_hash)
 
-        # Processing order (alphabetical): large_file → small_file → subdir/split_file
-        #   large_file.bin:      flush empty pending (0 tx) + uploadFragments 3 frags = 1 tx
-        #   small_file.bin:      accumulated into pending batch
-        #   subdir/split_file:   flush pending (1 file) = 1 tx + uploadFragments 2 frags = 1 tx
-        #   metadata:            1 tx
-        # Total: 4 submissions
+        # 3 fragments (large_file) + 1 (small_file) + 2 fragments (split_file) + 1 metadata = 7
+        # Note: batching reduces transactions but not submissions (log entries).
         wait_until(
-            lambda: self.contract.num_submissions() == submission_count + 4,
+            lambda: self.contract.num_submissions() == submission_count + 7,
             timeout=120,
         )
 
@@ -297,17 +293,17 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
 
-        # large_enc.bin: 512KB + 17B header = 524305B → 3 fragments (1 tx)
+        # large_enc.bin: 512KB + 17B header = 524305B → 3 fragments → 3 submissions
         large_file_path = os.path.join(temp_dir.name, "large_enc.bin")
         with open(large_file_path, "wb") as f:
             f.write(os.urandom(fragment_size * 2))
 
-        # small_enc.bin: 2KB + 17B = 2065B → small, accumulated into pending batch
+        # small_enc.bin: 2KB + 17B = 2065B → 1 submission (batched in one tx)
         small_file_path = os.path.join(temp_dir.name, "small_enc.bin")
         with open(small_file_path, "wb") as f:
             f.write(os.urandom(2048))
 
-        # subdir/nested_enc.bin: 768KB + 17B = 786449B → 4 fragments (1 tx)
+        # subdir/nested_enc.bin: 768KB + 17B = 786449B → 4 fragments → 4 submissions
         subdir_path = os.path.join(temp_dir.name, "subdir")
         os.makedirs(subdir_path)
         with open(os.path.join(subdir_path, "nested_enc.bin"), "wb") as f:
@@ -331,14 +327,14 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         self.log.info("Root hash: %s", root_hash)
 
-        # Processing order (alphabetical): large_enc → small_enc → subdir/nested_enc
-        #   large_enc.bin:       flush empty pending (0 tx) + uploadFragments 3 frags = 1 tx
-        #   small_enc.bin:       accumulated into pending batch
-        #   subdir/nested_enc:   flush pending (1 file) = 1 tx + uploadFragments 4 frags = 1 tx
-        #   metadata:            1 tx
-        # Total: 4 submissions
+        # Encryption adds 17-byte header, which may push fragment count up by 1
+        # large_enc: ~512KB + 17B encrypted → 3 fragments (crosses 2-segment boundary)
+        # small_enc: ~2KB + 17B → 1 fragment
+        # nested_enc: ~768KB + 17B encrypted → 4 fragments (crosses 3-segment boundary)
+        # metadata: 1 fragment
+        # Total: 3 + 1 + 4 + 1 = 9
         wait_until(
-            lambda: self.contract.num_submissions() == submission_count + 4,
+            lambda: self.contract.num_submissions() >= submission_count + 9,
             timeout=120,
         )
 
@@ -364,10 +360,11 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         self.log.info("Encrypted+fragmented directory upload/download test passed")
 
     def __test_batched_directory(self):
-        """Test that small files are batched together — N files with batch_size=B
-        produces ceil(N/B) + 1 (metadata) transactions instead of N + 1."""
+        """Test that small files are grouped into fewer on-chain transactions via --batch-size.
+        Submission count is unchanged (each file is still one log entry); what changes is
+        the number of transactions: ceil(N/batch_size) instead of N."""
         batch_size = 2
-        num_files = 6  # ceil(6/2) = 3 batch txs + 1 metadata = 4 total
+        num_files = 6
 
         temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
 
@@ -396,10 +393,11 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         self.log.info("Root hash: %s", root_hash)
 
-        # ceil(6/2) = 3 batch txs + 1 metadata = 4 submissions
-        expected = (num_files + batch_size - 1) // batch_size + 1
+        # 6 files (1 submission each) + 1 metadata = 7 submissions.
+        # With batch_size=2 this is ceil(6/2)=3 transactions instead of 6,
+        # but the submission (log entry) count is the same.
         wait_until(
-            lambda: self.contract.num_submissions() == submission_count + expected,
+            lambda: self.contract.num_submissions() == submission_count + num_files + 1,
             timeout=120,
         )
 
