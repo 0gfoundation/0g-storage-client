@@ -242,6 +242,13 @@ Upload an entire directory using explicit storage nodes:
   --file <directory_path>
 ```
 
+Files in the directory are batched together to minimise on-chain transactions. The `--batch-size` flag controls this batching and applies in two ways:
+
+- **Small files** (size ≤ `--fragment-size`): up to `--batch-size` files are submitted in a single transaction. A directory with 100 files and `--batch-size=10` (the default) produces 10 file transactions instead of 100.
+- **Large files** (size > `--fragment-size`): the file is split into fragments first, and up to `--batch-size` fragments are submitted per transaction. Large files are always handled individually and do not share a transaction with other files.
+
+After all files are uploaded, a small metadata blob encoding the directory tree (file names, relative paths, and root hashes) is uploaded as a final transaction. The root hash returned by `upload-dir` is the hash of this metadata blob — it is the only value you need to retain in order to download the directory later.
+
 ### Encrypted Directory Upload
 
 Encrypt all files in a directory before uploading:
@@ -255,7 +262,7 @@ Encrypt all files in a directory before uploading:
   --encryption-key <0x_hex_encoded_32_byte_key>
 ```
 
-Each file (and the directory metadata) is encrypted individually using AES-256-CTR. The same encryption key is used to decrypt during download.
+Each file is encrypted with AES-256-CTR before uploading. Encryption is applied before the large/small split decision, so the encrypted size (original size + 17-byte header) determines whether a file is batched with others or split into fragments. The directory metadata blob is also encrypted. Use the same key with `download-dir --encryption-key` to decrypt.
 
 ### Directory Download
 

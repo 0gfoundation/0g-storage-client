@@ -90,7 +90,7 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().BoolVar(&args.fastMode, "fast-mode", true, "Enable fast mode (no receipt wait, root-based upload for small files)")
 
 	cmd.Flags().Int64Var(&args.fragmentSize, "fragment-size", 1024*1024*1024*4, "the size of fragment to split into when file is too large")
-	cmd.Flags().UintVar(&args.batchSize, "batch-size", 10, "number of fragments to submit in a single batch")
+	cmd.Flags().UintVar(&args.batchSize, "batch-size", 10, "number of items to submit in a single on-chain transaction: fragments of a large split file (upload), or files in a directory (upload-dir)")
 
 	cmd.Flags().IntVar(&args.routines, "routines", runtime.GOMAXPROCS(0), "number of go routines for uploading simutanously")
 	cmd.Flags().UintVar(&args.maxGasPrice, "max-gas-price", 0, "max gas price to send transaction")
