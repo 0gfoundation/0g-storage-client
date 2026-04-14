@@ -86,6 +86,7 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         self.__test_encrypted_directory()
         self.__test_fragmented_directory()
         self.__test_encrypted_fragmented_directory()
+        self.__test_batched_directory()
 
     def __test_unencrypted_directory(self):
         temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
@@ -118,6 +119,8 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
             1,
         )
 
+        submission_count = self.contract.num_submissions()
+
         root_hash = self._upload_directory_use_cli(
             self.blockchain_nodes[0].rpc_url,
             GENESIS_ACCOUNT.key,
@@ -127,7 +130,10 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         )
 
         self.log.info("Root hash: %s", root_hash)
-        wait_until(lambda: self.contract.num_submissions() == 3)
+
+        # 2 files (1 submission each) + 1 metadata = 3 submissions.
+        # Batching reduces on-chain transactions but each file still creates one log entry.
+        wait_until(lambda: self.contract.num_submissions() == submission_count + 3)
 
         for node_idx in range(4):
             client = self.nodes[node_idx]
@@ -184,7 +190,7 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         self.log.info("Root hash: %s", root_hash)
 
-        # 5 files + 1 directory metadata = 6 submissions
+        # 5 files (1 submission each) + 1 directory metadata = 6 submissions
         wait_until(
             lambda: self.contract.num_submissions() == submission_count + 6,
             timeout=120,
@@ -214,25 +220,25 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
     def __test_fragmented_directory(self):
         """Test directory upload with small fragment size to force file splitting."""
-        fragment_size = 262144  # 256KB — one segment, forces splitting for larger files
+        fragment_size = 262144  # 256KB — forces splitting for larger files
 
         temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
 
-        # Create a file larger than fragment size so it gets split into multiple roots
+        # large_file.bin: 768KB → 3 fragments → 3 submissions
         large_file_path = os.path.join(temp_dir.name, "large_file.bin")
         with open(large_file_path, "wb") as f:
-            f.write(os.urandom(fragment_size * 3))  # 768KB → 3 fragments
+            f.write(os.urandom(fragment_size * 3))
 
-        # Create a small file that fits in a single fragment (no splitting)
+        # small_file.bin: 1KB → 1 submission (batched with others in one tx)
         small_file_path = os.path.join(temp_dir.name, "small_file.bin")
         with open(small_file_path, "wb") as f:
             f.write(os.urandom(1024))
 
-        # Create a subdirectory with a file that also gets split
+        # subdir/split_file.bin: 512KB → 2 fragments → 2 submissions
         subdir_path = os.path.join(temp_dir.name, "subdir")
         os.makedirs(subdir_path)
         with open(os.path.join(subdir_path, "split_file.bin"), "wb") as f:
-            f.write(os.urandom(fragment_size * 2))  # 512KB → 2 fragments
+            f.write(os.urandom(fragment_size * 2))
 
         self.log.info(
             "Uploading fragmented directory '%s' with fragment_size=%d",
@@ -254,6 +260,7 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         self.log.info("Root hash: %s", root_hash)
 
         # 3 fragments (large_file) + 1 (small_file) + 2 fragments (split_file) + 1 metadata = 7
+        # Note: batching reduces transactions but not submissions (log entries).
         wait_until(
             lambda: self.contract.num_submissions() == submission_count + 7,
             timeout=120,
@@ -286,21 +293,21 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
 
-        # Create a file larger than fragment size — will be encrypted then split
+        # large_enc.bin: 512KB + 17B header = 524305B → 3 fragments → 3 submissions
         large_file_path = os.path.join(temp_dir.name, "large_enc.bin")
         with open(large_file_path, "wb") as f:
-            f.write(os.urandom(fragment_size * 2))  # 512KB → 2 fragments after encryption
+            f.write(os.urandom(fragment_size * 2))
 
-        # Create a small file that fits in one fragment after encryption
+        # small_enc.bin: 2KB + 17B = 2065B → 1 submission (batched in one tx)
         small_file_path = os.path.join(temp_dir.name, "small_enc.bin")
         with open(small_file_path, "wb") as f:
             f.write(os.urandom(2048))
 
-        # Create a subdirectory with a split file
+        # subdir/nested_enc.bin: 768KB + 17B = 786449B → 4 fragments → 4 submissions
         subdir_path = os.path.join(temp_dir.name, "subdir")
         os.makedirs(subdir_path)
         with open(os.path.join(subdir_path, "nested_enc.bin"), "wb") as f:
-            f.write(os.urandom(fragment_size * 3))  # 768KB → 3 fragments after encryption
+            f.write(os.urandom(fragment_size * 3))
 
         self.log.info(
             "Uploading encrypted+fragmented directory '%s'", temp_dir.name
@@ -352,6 +359,68 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
 
         self.log.info("Encrypted+fragmented directory upload/download test passed")
 
+    def __test_batched_directory(self):
+        """Test that small files are grouped into fewer on-chain transactions via --batch-size.
+        Submission count is unchanged (each file is still one log entry); what changes is
+        the number of transactions: ceil(N/batch_size) instead of N."""
+        batch_size = 2
+        num_files = 6
+
+        temp_dir = tempfile.TemporaryDirectory(dir=self.root_dir)
+
+        for i in range(num_files):
+            file_path = os.path.join(temp_dir.name, "file_%02d.bin" % i)
+            with open(file_path, "wb") as f:
+                f.write(os.urandom(random.randint(512, 4096)))
+
+        self.log.info(
+            "Uploading directory '%s' with %d small files, batch_size=%d",
+            temp_dir.name,
+            num_files,
+            batch_size,
+        )
+
+        submission_count = self.contract.num_submissions()
+
+        root_hash = self._upload_directory_use_cli(
+            self.blockchain_nodes[0].rpc_url,
+            GENESIS_ACCOUNT.key,
+            ",".join([x.rpc_url for x in self.nodes]),
+            None,
+            temp_dir,
+            batch_size=batch_size,
+        )
+
+        self.log.info("Root hash: %s", root_hash)
+
+        # 6 files (1 submission each) + 1 metadata = 7 submissions.
+        # With batch_size=2 this is ceil(6/2)=3 transactions instead of 6,
+        # but the submission (log entry) count is the same.
+        wait_until(
+            lambda: self.contract.num_submissions() == submission_count + num_files + 1,
+            timeout=120,
+        )
+
+        for node_idx in range(4):
+            client = self.nodes[node_idx]
+            wait_until(lambda: client.zgs_get_file_info(root_hash) is not None)
+            wait_until(lambda: client.zgs_get_file_info(root_hash)["finalized"])
+
+        directory_to_download = os.path.join(self.root_dir, "download_batched")
+        self._download_directory_use_cli(
+            ",".join([x.rpc_url for x in self.nodes]),
+            None,
+            root=root_hash,
+            with_proof=True,
+            dir_to_download=directory_to_download,
+            remove=False,
+        )
+        assert directories_are_equal(
+            temp_dir.name, directory_to_download
+        ), "Batched directory content mismatch"
+
+        self.log.info("Batched directory upload/download test passed")
+
     def _upload_directory_use_cli(
         self,
         blockchain_node_rpc_url,
@@ -360,6 +429,7 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         indexer_url,
         dir_to_upload,
         fragment_size=None,
+        batch_size=None,
         skip_tx=True,
         encryption_key=None,
     ):
@@ -385,6 +455,9 @@ class DirectoryUploadDownloadTest(ClientTestFramework):
         if fragment_size is not None:
             upload_args.append("--fragment-size")
             upload_args.append(str(fragment_size))
+        if batch_size is not None:
+            upload_args.append("--batch-size")
+            upload_args.append(str(batch_size))
         if encryption_key is not None:
             upload_args.append("--encryption-key")
             upload_args.append(encryption_key)
