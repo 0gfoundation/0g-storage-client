@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
@@ -38,9 +39,9 @@ func TestSignDownloadRequest(t *testing.T) {
 	data = append(data, user.Bytes()...)
 	data = append(data, fileHash.Bytes()...)
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
-	hash := crypto.Keccak256Hash(data)
+	hash := accounts.TextHash(data)
 
-	pubKey, err := crypto.Ecrecover(hash.Bytes(), sig)
+	pubKey, err := crypto.Ecrecover(hash, sig)
 	require.NoError(t, err)
 	recoveredAddr := common.BytesToAddress(crypto.Keccak256(pubKey[1:])[12:])
 	assert.Equal(t, user, recoveredAddr)
@@ -63,9 +64,9 @@ func TestSignDownloadRequest_MultipleHashes(t *testing.T) {
 	data = append(data, hash1.Bytes()...)
 	data = append(data, hash2.Bytes()...)
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
-	msgHash := crypto.Keccak256Hash(data)
+	msgHash := accounts.TextHash(data)
 
-	pubKey, err := crypto.Ecrecover(msgHash.Bytes(), sig)
+	pubKey, err := crypto.Ecrecover(msgHash, sig)
 	require.NoError(t, err)
 	recoveredAddr := common.BytesToAddress(crypto.Keccak256(pubKey[1:])[12:])
 	assert.Equal(t, user, recoveredAddr)
@@ -128,9 +129,9 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 		data = append(data, user.Bytes()...)
 		data = append(data, fileHash.Bytes()...)
 		data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(req.Nonce).Bytes(), 32)...)
-		hash := crypto.Keccak256Hash(data)
+		hash := accounts.TextHash(data)
 
-		pubKey, err := crypto.Ecrecover(hash.Bytes(), sigBytes)
+		pubKey, err := crypto.Ecrecover(hash, sigBytes)
 		require.NoError(t, err)
 		recoveredAddr := common.BytesToAddress(crypto.Keccak256(pubKey[1:])[12:])
 		assert.Equal(t, user, recoveredAddr)

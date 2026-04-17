@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -31,7 +32,9 @@ func NewHotRouterClient(url string) *HotRouterClient {
 	}
 }
 
-// signDownloadRequest computes keccak256(user || fileHash1 || ... || fileHashN || nonce) and signs it.
+// signDownloadRequest signs the download request using EIP-191 personal_sign.
+// Message: keccak256("\x19Ethereum Signed Message:\n" + len(msg) + msg)
+// where msg = user || fileHash1 || ... || fileHashN || nonce (32-byte big-endian).
 func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, fileHashes []common.Hash, nonce uint64) ([]byte, error) {
 	data := make([]byte, 0, 20+32*len(fileHashes)+32)
 	data = append(data, user.Bytes()...)
@@ -40,8 +43,8 @@ func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, file
 	}
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
 
-	hash := crypto.Keccak256Hash(data)
-	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	hash := accounts.TextHash(data)
+	sig, err := crypto.Sign(hash, privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign download request: %w", err)
 	}
