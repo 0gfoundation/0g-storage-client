@@ -5,12 +5,12 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
@@ -39,9 +39,10 @@ func TestSignDownloadRequest(t *testing.T) {
 	data = append(data, user.Bytes()...)
 	data = append(data, fileHash.Bytes()...)
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
-	hash := accounts.TextHash(data)
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
+	hash := crypto.Keccak256Hash([]byte(prefix), data)
 
-	pubKey, err := crypto.Ecrecover(hash, sig)
+	pubKey, err := crypto.Ecrecover(hash.Bytes(), sig)
 	require.NoError(t, err)
 	recoveredAddr := common.BytesToAddress(crypto.Keccak256(pubKey[1:])[12:])
 	assert.Equal(t, user, recoveredAddr)
@@ -64,9 +65,10 @@ func TestSignDownloadRequest_MultipleHashes(t *testing.T) {
 	data = append(data, hash1.Bytes()...)
 	data = append(data, hash2.Bytes()...)
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
-	msgHash := accounts.TextHash(data)
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
+	msgHash := crypto.Keccak256Hash([]byte(prefix), data)
 
-	pubKey, err := crypto.Ecrecover(msgHash, sig)
+	pubKey, err := crypto.Ecrecover(msgHash.Bytes(), sig)
 	require.NoError(t, err)
 	recoveredAddr := common.BytesToAddress(crypto.Keccak256(pubKey[1:])[12:])
 	assert.Equal(t, user, recoveredAddr)
@@ -129,9 +131,10 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 		data = append(data, user.Bytes()...)
 		data = append(data, fileHash.Bytes()...)
 		data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(req.Nonce).Bytes(), 32)...)
-		hash := accounts.TextHash(data)
+		prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
+		hash := crypto.Keccak256Hash([]byte(prefix), data)
 
-		pubKey, err := crypto.Ecrecover(hash, sigBytes)
+		pubKey, err := crypto.Ecrecover(hash.Bytes(), sigBytes)
 		require.NoError(t, err)
 		recoveredAddr := common.BytesToAddress(crypto.Keccak256(pubKey[1:])[12:])
 		assert.Equal(t, user, recoveredAddr)
