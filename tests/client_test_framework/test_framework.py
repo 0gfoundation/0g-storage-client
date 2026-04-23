@@ -119,6 +119,7 @@ class ClientTestFramework(TestFramework):
         fragment_size=None,
         skip_tx=True,
         encryption_key=None,
+        encrypt=False,
     ):
         upload_args = [
             self.cli_binary,
@@ -143,6 +144,8 @@ class ClientTestFramework(TestFramework):
         if encryption_key is not None:
             upload_args.append("--encryption-key")
             upload_args.append(encryption_key)
+        if encrypt:
+            upload_args.append("--encrypt")
 
         upload_args.append("--file")
         self.log.info("upload file with cli: {}".format(upload_args))
@@ -198,6 +201,8 @@ class ClientTestFramework(TestFramework):
         with_proof=True,
         remove=True,
         encryption_key=None,
+        decrypt=False,
+        private_key=None,
     ):
         if file_to_download is None:
             file_to_download = os.path.join(
@@ -222,6 +227,11 @@ class ClientTestFramework(TestFramework):
         if encryption_key is not None:
             download_args.append("--encryption-key")
             download_args.append(encryption_key)
+        if decrypt:
+            download_args.append("--decrypt")
+        if private_key is not None:
+            download_args.append("--private-key")
+            download_args.append(private_key)
 
         if node_rpc_url is not None:
             download_args.append("--node")

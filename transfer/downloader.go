@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,31 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
+
+// ResolveDecryptionKey picks the correct AES key for the given header version.
+// v1 headers require a 32-byte symmetric key; v2 headers require a wallet private key
+// and derive the AES key from it and the header's ephemeral pubkey.
+func ResolveDecryptionKey(symmetricKey []byte, walletPriv *ecdsa.PrivateKey, header *core.EncryptionHeader) ([32]byte, error) {
+	var key [32]byte
+	switch header.Version {
+	case core.SymmetricVersion:
+		if len(symmetricKey) == 0 {
+			return key, errors.New("v1 encrypted file requires --encryption-key")
+		}
+		if len(symmetricKey) != 32 {
+			return key, errors.New("encryption key must be 32 bytes")
+		}
+		copy(key[:], symmetricKey)
+		return key, nil
+	case core.ECIESVersion:
+		if walletPriv == nil {
+			return key, errors.New("v2 encrypted file requires --private-key for ECIES decryption")
+		}
+		return core.DeriveECIESDecryptKey(walletPriv, header.EphemeralPub)
+	default:
+		return key, errors.Errorf("unsupported encryption version: %d", header.Version)
+	}
+}
 
 var (
 	_ IDownloader = (*Downloader)(nil)
@@ -33,7 +59,8 @@ type Downloader struct {
 
 	routines int
 
-	encryptionKey []byte // optional 32-byte AES-256 decryption key
+	encryptionKey    []byte            // optional 32-byte AES-256 decryption key (v1 symmetric)
+	walletPrivateKey *ecdsa.PrivateKey // optional wallet private key for ECIES v2 decryption
 
 	logger *logrus.Logger
 }
@@ -56,15 +83,26 @@ func (downloader *Downloader) WithRoutines(routines int) *Downloader {
 	return downloader
 }
 
-// WithEncryptionKey sets the encryption key for post-download decryption.
+// WithEncryptionKey sets the v1 symmetric encryption key for post-download decryption.
 // The key must be exactly 32 bytes (AES-256).
 func (downloader *Downloader) WithEncryptionKey(key []byte) *Downloader {
 	downloader.encryptionKey = key
 	return downloader
 }
 
+// WithWalletPrivateKey sets the wallet private key used to decrypt v2 (ECIES) encrypted files.
+func (downloader *Downloader) WithWalletPrivateKey(priv *ecdsa.PrivateKey) *Downloader {
+	downloader.walletPrivateKey = priv
+	return downloader
+}
+
+// hasDecryptionKey reports whether this downloader can attempt to decrypt an encrypted file.
+func (downloader *Downloader) hasDecryptionKey() bool {
+	return len(downloader.encryptionKey) > 0 || downloader.walletPrivateKey != nil
+}
+
 func (downloader *Downloader) DownloadFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	if len(downloader.encryptionKey) > 0 {
+	if downloader.hasDecryptionKey() {
 		return downloader.downloadEncryptedFragments(ctx, roots, filename, withProof)
 	}
 	return downloader.downloadPlainFragments(ctx, roots, filename, withProof)
@@ -106,12 +144,6 @@ func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots 
 // extracts the encryption header from fragment 0, then decrypts each fragment
 // with proper CTR offset tracking and writes decrypted data to the output file.
 func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	if len(downloader.encryptionKey) != 32 {
-		return errors.New("encryption key must be 32 bytes")
-	}
-	var key [32]byte
-	copy(key[:], downloader.encryptionKey)
-
 	outFile, err := os.Create(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
@@ -119,6 +151,7 @@ func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, ro
 	defer outFile.Close()
 
 	var header *core.EncryptionHeader
+	var key [32]byte
 	var cumulativeDataOffset uint64
 
 	for i, root := range roots {
@@ -136,10 +169,14 @@ func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, ro
 		os.Remove(tempFile)
 
 		if i == 0 {
-			// First fragment: extract header
+			// First fragment: extract header and resolve the AES key from available material.
 			header, err = core.ParseEncryptionHeader(fragmentData)
 			if err != nil {
 				return errors.WithMessage(err, "Failed to parse encryption header from fragment 0")
+			}
+			key, err = ResolveDecryptionKey(downloader.encryptionKey, downloader.walletPrivateKey, header)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -188,8 +225,8 @@ func (downloader *Downloader) Download(ctx context.Context, root, filename strin
 		return err
 	}
 
-	// Decrypt the file if an encryption key is set
-	if len(downloader.encryptionKey) > 0 {
+	// Decrypt the file if any decryption key is set
+	if downloader.hasDecryptionKey() {
 		if err := downloader.decryptDownloadedFile(filename); err != nil {
 			return errors.WithMessage(err, "Failed to decrypt downloaded file")
 		}
@@ -293,17 +330,21 @@ func (downloader *Downloader) validateDownloadFile(root, filename string, fileSi
 }
 
 func (downloader *Downloader) decryptDownloadedFile(filename string) error {
-	if len(downloader.encryptionKey) != 32 {
-		return errors.New("encryption key must be 32 bytes")
-	}
-
 	encrypted, err := os.ReadFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "Failed to read encrypted file")
 	}
 
-	var key [32]byte
-	copy(key[:], downloader.encryptionKey)
+	header, err := core.ParseEncryptionHeader(encrypted)
+	if err != nil {
+		return errors.WithMessage(err, "Failed to parse encryption header")
+	}
+
+	key, err := ResolveDecryptionKey(downloader.encryptionKey, downloader.walletPrivateKey, header)
+	if err != nil {
+		return err
+	}
+
 	decrypted, err := core.DecryptFile(&key, encrypted)
 	if err != nil {
 		return errors.WithMessage(err, "Failed to decrypt file")

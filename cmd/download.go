@@ -31,6 +31,7 @@ type downloadArgument struct {
 	proof bool
 
 	encryptionKey string
+	decrypt       bool
 
 	routines int
 
@@ -54,7 +55,8 @@ func bindDownloadFlags(cmd *cobra.Command, args *downloadArgument) {
 
 	cmd.Flags().BoolVar(&args.proof, "proof", false, "Whether to download with merkle proof for validation")
 
-	cmd.Flags().StringVar(&args.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 encryption key for file decryption")
+	cmd.Flags().StringVar(&args.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 symmetric key for v1 decryption (mutually exclusive with --decrypt)")
+	cmd.Flags().BoolVar(&args.decrypt, "decrypt", false, "Decrypt v2 (ECIES) files using --private-key as the wallet private key (mutually exclusive with --encryption-key)")
 
 	cmd.Flags().IntVar(&args.routines, "routines", runtime.GOMAXPROCS(0), "number of go routines for downloading simultaneously")
 
@@ -96,6 +98,12 @@ func download(*cobra.Command, []string) {
 	} else if downloadArgs.indexer == "" && len(downloadArgs.nodes) == 0 {
 		logrus.Fatal("one of --indexer, --node, or --hot-router is required")
 	}
+	if downloadArgs.decrypt && downloadArgs.encryptionKey != "" {
+		logrus.Fatal("--decrypt and --encryption-key are mutually exclusive")
+	}
+	if downloadArgs.decrypt && downloadArgs.privateKey == "" {
+		logrus.Fatal("--decrypt requires --private-key")
+	}
 
 	var (
 		downloader transfer.IDownloader
@@ -118,6 +126,9 @@ func download(*cobra.Command, []string) {
 			keyBytes := mustDecodeEncryptionKey(downloadArgs.encryptionKey)
 			indexerClient.WithEncryptionKey(keyBytes)
 		}
+		if downloadArgs.decrypt && downloadArgs.hotRouter == "" {
+			indexerClient.WithWalletPrivateKey(mustParsePrivateKey(downloadArgs.privateKey))
+		}
 		baseDownloader = indexerClient
 	} else if len(downloadArgs.nodes) > 0 {
 		clients := node.MustNewZgsClients(downloadArgs.nodes, nil, providerOption)
@@ -138,6 +149,9 @@ func download(*cobra.Command, []string) {
 			keyBytes := mustDecodeEncryptionKey(downloadArgs.encryptionKey)
 			downloaderImpl.WithEncryptionKey(keyBytes)
 		}
+		if downloadArgs.decrypt && downloadArgs.hotRouter == "" {
+			downloaderImpl.WithWalletPrivateKey(mustParsePrivateKey(downloadArgs.privateKey))
+		}
 		baseDownloader = downloaderImpl
 		defer closer()
 	}
@@ -150,6 +164,9 @@ func download(*cobra.Command, []string) {
 		if downloadArgs.encryptionKey != "" {
 			keyBytes := mustDecodeEncryptionKey(downloadArgs.encryptionKey)
 			hotDownloader.WithEncryptionKey(keyBytes)
+		}
+		if downloadArgs.decrypt {
+			hotDownloader.WithWalletPrivateKey(privateKey)
 		}
 		downloader = hotDownloader
 	} else {

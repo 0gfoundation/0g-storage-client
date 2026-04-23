@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"strings"
 
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/common/blockchain"
 	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -62,6 +65,9 @@ func uploadDir(*cobra.Command, []string) {
 	if uploadDirArgs.finalityRequired {
 		finalityRequired = transfer.FileFinalized
 	}
+	if uploadDirArgs.encrypt && uploadDirArgs.encryptionKey != "" {
+		logrus.Fatal("--encrypt and --encryption-key are mutually exclusive")
+	}
 	var encryptionKey []byte
 	if uploadDirArgs.encryptionKey != "" {
 		var err error
@@ -73,12 +79,21 @@ func uploadDir(*cobra.Command, []string) {
 			logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
 		}
 	}
+	var recipientPubKey *ecdsa.PublicKey
+	if uploadDirArgs.encrypt {
+		priv, err := crypto.HexToECDSA(strings.TrimPrefix(uploadDirArgs.key, "0x"))
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to parse --key for ECIES encryption")
+		}
+		recipientPubKey = &priv.PublicKey
+	}
 	opt := transfer.UploadOption{
 		TransactionOption: transfer.TransactionOption{
 			Submitter: submitter,
 		},
 		Tags:             hexutil.MustDecode(uploadDirArgs.tags),
 		EncryptionKey:    encryptionKey,
+		RecipientPubKey:  recipientPubKey,
 		FinalityRequired: finalityRequired,
 		TaskSize:         uploadDirArgs.taskSize,
 		ExpectedReplica:  uploadDirArgs.expectedReplica,
