@@ -31,7 +31,9 @@ func NewHotRouterClient(url string) *HotRouterClient {
 	}
 }
 
-// signDownloadRequest computes keccak256(user || fileHash1 || ... || fileHashN || nonce) and signs it.
+// signDownloadRequest signs the download request using standard EIP-191 personal_sign.
+// hash = keccak256("\x19Ethereum Signed Message:\n" + len(data) + data)
+// where data = user_bytes || hash1_bytes || ... || hashN_bytes || nonce_32bytes
 func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, fileHashes []common.Hash, nonce uint64) ([]byte, error) {
 	data := make([]byte, 0, 20+32*len(fileHashes)+32)
 	data = append(data, user.Bytes()...)
@@ -40,8 +42,9 @@ func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, file
 	}
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
 
-	hash := crypto.Keccak256Hash(data)
-	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
+	signingHash := crypto.Keccak256Hash([]byte(prefix), data)
+	sig, err := crypto.Sign(signingHash.Bytes(), privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign download request: %w", err)
 	}

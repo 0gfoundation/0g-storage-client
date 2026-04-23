@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,8 @@ func TestSignDownloadRequest(t *testing.T) {
 	data = append(data, user.Bytes()...)
 	data = append(data, fileHash.Bytes()...)
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
-	hash := crypto.Keccak256Hash(data)
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
+	hash := crypto.Keccak256Hash([]byte(prefix), data)
 
 	pubKey, err := crypto.Ecrecover(hash.Bytes(), sig)
 	require.NoError(t, err)
@@ -63,7 +65,8 @@ func TestSignDownloadRequest_MultipleHashes(t *testing.T) {
 	data = append(data, hash1.Bytes()...)
 	data = append(data, hash2.Bytes()...)
 	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
-	msgHash := crypto.Keccak256Hash(data)
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
+	msgHash := crypto.Keccak256Hash([]byte(prefix), data)
 
 	pubKey, err := crypto.Ecrecover(msgHash.Bytes(), sig)
 	require.NoError(t, err)
@@ -128,7 +131,8 @@ func TestGetDownloadAuth_Success(t *testing.T) {
 		data = append(data, user.Bytes()...)
 		data = append(data, fileHash.Bytes()...)
 		data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(req.Nonce).Bytes(), 32)...)
-		hash := crypto.Keccak256Hash(data)
+		prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
+		hash := crypto.Keccak256Hash([]byte(prefix), data)
 
 		pubKey, err := crypto.Ecrecover(hash.Bytes(), sigBytes)
 		require.NoError(t, err)
