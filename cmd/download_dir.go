@@ -36,6 +36,13 @@ func downloadDir(*cobra.Command, []string) {
 		defer cancel()
 	}
 
+	if downloadDirArgs.decrypt && downloadDirArgs.encryptionKey != "" {
+		logrus.Fatal("--decrypt and --encryption-key are mutually exclusive")
+	}
+	if downloadDirArgs.decrypt && downloadDirArgs.privateKey == "" {
+		logrus.Fatal("--decrypt requires --private-key")
+	}
+
 	var downloader transfer.IDownloader
 	if downloadDirArgs.indexer != "" {
 		indexerClient, err := indexer.NewClient(downloadDirArgs.indexer, indexer.IndexerClientOption{
@@ -56,6 +63,9 @@ func downloadDir(*cobra.Command, []string) {
 				logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
 			}
 			indexerClient.WithEncryptionKey(keyBytes)
+		}
+		if downloadDirArgs.decrypt {
+			indexerClient.WithWalletPrivateKey(mustParsePrivateKey(downloadDirArgs.privateKey))
 		}
 		downloader = indexerClient
 	} else {
@@ -82,6 +92,9 @@ func downloadDir(*cobra.Command, []string) {
 				logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
 			}
 			downloaderImpl.WithEncryptionKey(keyBytes)
+		}
+		if downloadDirArgs.decrypt {
+			downloaderImpl.WithWalletPrivateKey(mustParsePrivateKey(downloadDirArgs.privateKey))
 		}
 		downloader = downloaderImpl
 		defer closer()

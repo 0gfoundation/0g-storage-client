@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"math"
 	"math/big"
@@ -60,8 +61,9 @@ type UploadOption struct {
 	TransactionOption
 
 	// Data options
-	Tags          []byte // transaction tags
-	EncryptionKey []byte // optional 32-byte AES-256 encryption key; when set, data is encrypted before upload
+	Tags            []byte           // transaction tags
+	EncryptionKey   []byte           // optional 32-byte AES-256 encryption key (v1 symmetric); mutually exclusive with RecipientPubKey
+	RecipientPubKey *ecdsa.PublicKey // optional recipient secp256k1 pubkey (v2 ECIES); mutually exclusive with EncryptionKey
 
 	// Upload behavior
 	FinalityRequired FinalityRequirement // finality setting
@@ -167,8 +169,22 @@ func NewUploaderWithContractConfig(ctx context.Context, w3Client *web3go.Client,
 	return uploader, nil
 }
 
-// wrapEncryption wraps data with AES-256-CTR encryption if an encryption key is provided.
+// wrapEncryption wraps data with AES-256-CTR encryption.
+// If EncryptionKey is set: v1 symmetric header, caller-supplied 32-byte key.
+// If RecipientPubKey is set: v2 ECIES header, AES key derived via ECDH+HKDF.
+// Both set is an error.
 func (uploader *Uploader) wrapEncryption(data core.IterableData, opt UploadOption) (core.IterableData, error) {
+	if len(opt.EncryptionKey) > 0 && opt.RecipientPubKey != nil {
+		return nil, errors.New("EncryptionKey and RecipientPubKey are mutually exclusive")
+	}
+	if opt.RecipientPubKey != nil {
+		encData, err := core.NewEncryptedDataECIES(data, opt.RecipientPubKey)
+		if err != nil {
+			return nil, errors.WithMessage(err, "Failed to create ECIES encrypted data")
+		}
+		uploader.logger.Info("Data encryption enabled (ECIES)")
+		return encData, nil
+	}
 	if len(opt.EncryptionKey) == 0 {
 		return data, nil
 	}

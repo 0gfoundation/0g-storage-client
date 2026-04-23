@@ -3,6 +3,7 @@ package core
 import (
 	"testing"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,11 +13,49 @@ func TestHeaderRoundtrip(t *testing.T) {
 	require.NoError(t, err)
 
 	bytes := header.ToBytes()
-	parsed, err := ParseEncryptionHeader(bytes[:])
+	assert.Equal(t, SymmetricHeaderSize, len(bytes), "v1 header must serialize to 17 bytes")
+
+	parsed, err := ParseEncryptionHeader(bytes)
 	require.NoError(t, err)
 
-	assert.Equal(t, uint8(EncryptionVersion), parsed.Version)
+	assert.Equal(t, uint8(SymmetricVersion), parsed.Version)
 	assert.Equal(t, header.Nonce, parsed.Nonce)
+	assert.Equal(t, SymmetricHeaderSize, parsed.Size())
+}
+
+func TestECIESHeaderRoundtrip(t *testing.T) {
+	recipientPriv, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	header, _, err := NewECIESEncryptionHeader(&recipientPriv.PublicKey)
+	require.NoError(t, err)
+
+	bytes := header.ToBytes()
+	assert.Equal(t, ECIESHeaderSize, len(bytes), "v2 header must serialize to 50 bytes")
+
+	parsed, err := ParseEncryptionHeader(bytes)
+	require.NoError(t, err)
+
+	assert.Equal(t, uint8(ECIESVersion), parsed.Version)
+	assert.Equal(t, header.Nonce, parsed.Nonce)
+	assert.Equal(t, header.EphemeralPub, parsed.EphemeralPub)
+	assert.Equal(t, ECIESHeaderSize, parsed.Size())
+}
+
+func TestParseEncryptionHeaderUnsupportedVersion(t *testing.T) {
+	data := make([]byte, 17)
+	data[0] = 0xEE
+	_, err := ParseEncryptionHeader(data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported encryption version")
+}
+
+func TestParseEncryptionHeaderV2TooShort(t *testing.T) {
+	data := make([]byte, 17)
+	data[0] = ECIESVersion
+	_, err := ParseEncryptionHeader(data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too short")
 }
 
 func TestCryptRoundtrip(t *testing.T) {
@@ -80,7 +119,7 @@ func TestDecryptFileTooShort(t *testing.T) {
 func TestDecryptFileWrongVersion(t *testing.T) {
 	key := [32]byte{}
 	// Header with wrong version byte (0xFF), followed by 16 nonce bytes + 1 data byte
-	data := make([]byte, EncryptionHeaderSize+1)
+	data := make([]byte, SymmetricHeaderSize+1)
 	data[0] = 0xFF // wrong version
 	_, err := DecryptFile(&key, data)
 	assert.Error(t, err)
@@ -89,7 +128,7 @@ func TestDecryptFileWrongVersion(t *testing.T) {
 
 func TestDecryptFragmentDataFirstFragmentTooShort(t *testing.T) {
 	key := [32]byte{}
-	header := &EncryptionHeader{Version: EncryptionVersion}
+	header := &EncryptionHeader{Version: SymmetricVersion}
 	// First fragment shorter than header size
 	_, _, err := DecryptFragmentData(&key, header, []byte{0x01}, true, 0)
 	assert.Error(t, err)
@@ -112,7 +151,7 @@ func TestDecryptFile(t *testing.T) {
 	CryptAt(&key, &header.Nonce, 0, encryptedData)
 
 	headerBytes := header.ToBytes()
-	encryptedFile := make([]byte, 0, EncryptionHeaderSize+len(encryptedData))
+	encryptedFile := make([]byte, 0, SymmetricHeaderSize+len(encryptedData))
 	encryptedFile = append(encryptedFile, headerBytes[:]...)
 	encryptedFile = append(encryptedFile, encryptedData...)
 

@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"io"
 	"os"
@@ -29,9 +30,10 @@ var (
 // Client indexer client
 type Client struct {
 	*rpc.Client
-	option        IndexerClientOption
-	logger        *logrus.Logger
-	encryptionKey []byte // optional 32-byte AES-256 decryption key
+	option           IndexerClientOption
+	logger           *logrus.Logger
+	encryptionKey    []byte            // optional 32-byte AES-256 decryption key (v1 symmetric)
+	walletPrivateKey *ecdsa.PrivateKey // optional wallet private key for ECIES v2 decryption
 }
 
 // IndexerClientOption indexer client option
@@ -322,15 +324,25 @@ func (c *Client) NewDownloaderFromIndexerNodes(ctx context.Context, root string)
 	return downloader, nil
 }
 
-// WithEncryptionKey sets the encryption key for post-download decryption.
+// WithEncryptionKey sets the v1 symmetric encryption key for post-download decryption.
 // The key must be exactly 32 bytes (AES-256).
 func (c *Client) WithEncryptionKey(key []byte) *Client {
 	c.encryptionKey = key
 	return c
 }
 
+// WithWalletPrivateKey sets the wallet private key used to decrypt v2 (ECIES) files.
+func (c *Client) WithWalletPrivateKey(priv *ecdsa.PrivateKey) *Client {
+	c.walletPrivateKey = priv
+	return c
+}
+
+func (c *Client) hasDecryptionKey() bool {
+	return len(c.encryptionKey) > 0 || c.walletPrivateKey != nil
+}
+
 func (c *Client) DownloadFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	if len(c.encryptionKey) > 0 {
+	if c.hasDecryptionKey() {
 		return c.downloadEncryptedFragments(ctx, roots, filename, withProof)
 	}
 	return c.downloadPlainFragments(ctx, roots, filename, withProof)
@@ -376,12 +388,6 @@ func (c *Client) downloadPlainFragments(ctx context.Context, roots []string, fil
 // extracts the encryption header from fragment 0, then decrypts each fragment
 // with proper CTR offset tracking and writes decrypted data to the output file.
 func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	if len(c.encryptionKey) != 32 {
-		return errors.New("encryption key must be 32 bytes")
-	}
-	var key [32]byte
-	copy(key[:], c.encryptionKey)
-
 	outFile, err := os.Create(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
@@ -389,6 +395,7 @@ func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string,
 	defer outFile.Close()
 
 	var header *core.EncryptionHeader
+	var key [32]byte
 	var cumulativeDataOffset uint64
 
 	for i, root := range roots {
@@ -411,10 +418,14 @@ func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string,
 		os.Remove(tempFile)
 
 		if i == 0 {
-			// First fragment: extract header
+			// First fragment: extract header and resolve the AES key
 			header, err = core.ParseEncryptionHeader(fragmentData)
 			if err != nil {
 				return errors.WithMessage(err, "Failed to parse encryption header from fragment 0")
+			}
+			key, err = transfer.ResolveDecryptionKey(c.encryptionKey, c.walletPrivateKey, header)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -441,6 +452,9 @@ func (c *Client) Download(ctx context.Context, root, filename string, withProof 
 	}
 	if len(c.encryptionKey) > 0 {
 		downloader.WithEncryptionKey(c.encryptionKey)
+	}
+	if c.walletPrivateKey != nil {
+		downloader.WithWalletPrivateKey(c.walletPrivateKey)
 	}
 	return downloader.Download(ctx, root, filename, withProof)
 }

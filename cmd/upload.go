@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"math/big"
 	"runtime"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -66,6 +68,7 @@ type uploadArgument struct {
 	timeout time.Duration
 
 	encryptionKey string
+	encrypt       bool
 
 	flowAddress   string
 	marketAddress string
@@ -101,7 +104,8 @@ func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 
 	cmd.Flags().DurationVar(&args.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
 
-	cmd.Flags().StringVar(&args.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 encryption key for file encryption")
+	cmd.Flags().StringVar(&args.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 symmetric encryption key (v1, mutually exclusive with --encrypt)")
+	cmd.Flags().BoolVar(&args.encrypt, "encrypt", false, "Encrypt file with ECIES using --key's wallet pubkey; decryptable only with the same private key (v2, mutually exclusive with --encryption-key)")
 
 	cmd.Flags().StringVar(&args.flowAddress, "flow-address", "", "Flow contract address (skip storage node status call when set)")
 	cmd.Flags().StringVar(&args.marketAddress, "market-address", "", "Market contract address (optional, skip flow lookup when set)")
@@ -168,6 +172,9 @@ func upload(*cobra.Command, []string) {
 	if uploadArgs.maxGasPrice > 0 {
 		maxGasPrice = big.NewInt(int64(uploadArgs.maxGasPrice))
 	}
+	if uploadArgs.encrypt && uploadArgs.encryptionKey != "" {
+		logrus.Fatal("--encrypt and --encryption-key are mutually exclusive")
+	}
 	var encryptionKey []byte
 	if uploadArgs.encryptionKey != "" {
 		var err error
@@ -178,6 +185,14 @@ func upload(*cobra.Command, []string) {
 		if len(encryptionKey) != 32 {
 			logrus.Fatal("Encryption key must be exactly 32 bytes (64 hex characters)")
 		}
+	}
+	var recipientPubKey *ecdsa.PublicKey
+	if uploadArgs.encrypt {
+		priv, err := crypto.HexToECDSA(strings.TrimPrefix(uploadArgs.key, "0x"))
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to parse --key for ECIES encryption")
+		}
+		recipientPubKey = &priv.PublicKey
 	}
 
 	opt := transfer.UploadOption{
@@ -191,6 +206,7 @@ func upload(*cobra.Command, []string) {
 		},
 		Tags:             hexutil.MustDecode(uploadArgs.tags),
 		EncryptionKey:    encryptionKey,
+		RecipientPubKey:  recipientPubKey,
 		FinalityRequired: finalityRequired,
 		TaskSize:         uploadArgs.taskSize,
 		ExpectedReplica:  uploadArgs.expectedReplica,

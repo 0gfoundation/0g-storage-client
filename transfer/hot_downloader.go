@@ -25,7 +25,8 @@ type HotDownloader struct {
 	privateKey   *ecdsa.PrivateKey
 	fallback     IDownloader
 
-	encryptionKey []byte
+	encryptionKey    []byte            // v1 symmetric AES-256 key
+	walletPrivateKey *ecdsa.PrivateKey // set to enable v2 ECIES decryption (typically same value as privateKey)
 
 	logger *logrus.Logger
 }
@@ -40,10 +41,21 @@ func NewHotDownloader(routerClient *node.HotRouterClient, privateKey *ecdsa.Priv
 	}
 }
 
-// WithEncryptionKey sets the encryption key for post-download decryption.
+// WithEncryptionKey sets the v1 symmetric encryption key for post-download decryption.
 func (d *HotDownloader) WithEncryptionKey(key []byte) *HotDownloader {
 	d.encryptionKey = key
 	return d
+}
+
+// WithWalletPrivateKey enables v2 (ECIES) decryption using the given private key.
+// Typically this is the same value passed to NewHotDownloader for router signing.
+func (d *HotDownloader) WithWalletPrivateKey(priv *ecdsa.PrivateKey) *HotDownloader {
+	d.walletPrivateKey = priv
+	return d
+}
+
+func (d *HotDownloader) hasDecryptionKey() bool {
+	return len(d.encryptionKey) > 0 || d.walletPrivateKey != nil
 }
 
 // Download downloads a single file, trying hot storage first and falling back to regular download.
@@ -66,7 +78,7 @@ func (d *HotDownloader) Download(ctx context.Context, root, filename string, wit
 		return d.fallback.Download(ctx, root, filename, withProof)
 	}
 
-	if len(d.encryptionKey) > 0 {
+	if d.hasDecryptionKey() {
 		if err := d.decryptFile(filename); err != nil {
 			return errors.WithMessage(err, "failed to decrypt hot storage data")
 		}
@@ -78,7 +90,7 @@ func (d *HotDownloader) Download(ctx context.Context, root, filename string, wit
 
 // DownloadFragments downloads multiple fragments, trying hot storage first per fragment.
 func (d *HotDownloader) DownloadFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	if len(d.encryptionKey) > 0 {
+	if d.hasDecryptionKey() {
 		return d.downloadEncryptedFragments(ctx, roots, filename, withProof)
 	}
 	return d.downloadPlainFragments(ctx, roots, filename, withProof)
@@ -122,12 +134,6 @@ func (d *HotDownloader) downloadPlainFragments(ctx context.Context, roots []stri
 }
 
 func (d *HotDownloader) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	if len(d.encryptionKey) != 32 {
-		return errors.New("encryption key must be 32 bytes")
-	}
-	var key [32]byte
-	copy(key[:], d.encryptionKey)
-
 	outFile, err := os.Create(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
@@ -135,6 +141,7 @@ func (d *HotDownloader) downloadEncryptedFragments(ctx context.Context, roots []
 	defer outFile.Close()
 
 	var header *core.EncryptionHeader
+	var key [32]byte
 	var cumulativeDataOffset uint64
 
 	for i, root := range roots {
@@ -147,6 +154,10 @@ func (d *HotDownloader) downloadEncryptedFragments(ctx context.Context, roots []
 			header, err = core.ParseEncryptionHeader(fragmentData)
 			if err != nil {
 				return errors.WithMessage(err, "failed to parse encryption header from fragment 0")
+			}
+			key, err = ResolveDecryptionKey(d.encryptionKey, d.walletPrivateKey, header)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -240,14 +251,20 @@ func (d *HotDownloader) tryHotDownloadToFile(ctx context.Context, root, path str
 	return ok, err
 }
 
-// decryptFile decrypts the file at filename in-place using the downloader's encryption key.
+// decryptFile decrypts the file at filename in-place, auto-detecting v1 vs v2 from its header.
 func (d *HotDownloader) decryptFile(filename string) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to read file for decryption")
 	}
-	var key [32]byte
-	copy(key[:], d.encryptionKey)
+	header, err := core.ParseEncryptionHeader(data)
+	if err != nil {
+		return errors.WithMessage(err, "failed to parse encryption header")
+	}
+	key, err := ResolveDecryptionKey(d.encryptionKey, d.walletPrivateKey, header)
+	if err != nil {
+		return err
+	}
 	decrypted, err := core.DecryptFile(&key, data)
 	if err != nil {
 		return errors.WithMessage(err, "failed to decrypt file")

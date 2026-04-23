@@ -22,7 +22,8 @@ if __name__ == "__main__":
             "cli_dir_test.py",
         },
         single_run_tests={
-            "cli_file_encrypted_upload_download_test.py"
+            "cli_file_encrypted_upload_download_test.py",
+            "cli_file_ecies_upload_download_test.py",
         },
         long_manual_tests={},
         skip_tests={},

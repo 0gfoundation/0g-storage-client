@@ -3,60 +3,120 @@ package core
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 )
 
 const (
-	// EncryptionHeaderSize is the size of the encryption header in bytes (1 byte version + 16 bytes nonce).
-	EncryptionHeaderSize = 17
+	// SymmetricVersion identifies v1 headers: user-supplied 32-byte AES-256-CTR key.
+	SymmetricVersion = 1
+	// SymmetricHeaderSize is the v1 header size: 1 byte version + 16 bytes nonce.
+	SymmetricHeaderSize = 17
 
-	// EncryptionVersion is the current encryption format version.
-	EncryptionVersion = 1
+	// ECIESVersion identifies v2 headers: ECIES over secp256k1 with AES-256-CTR bulk cipher.
+	ECIESVersion = 2
+	// ECIESHeaderSize is the v2 header size: 1 byte version + 33 bytes compressed ephemeral pubkey + 16 bytes nonce.
+	ECIESHeaderSize = 1 + EphemeralPubKeySize + 16
 )
 
-// EncryptionHeader stores the version and nonce for AES-256-CTR encryption.
+// EncryptionHeader stores the metadata needed to decrypt a file.
+//
+//	v1 (SymmetricVersion): Version + Nonce only. Caller supplies the AES-256 key out-of-band.
+//	v2 (ECIESVersion):     Version + EphemeralPub + Nonce. Caller derives the AES-256 key
+//	                       from a recipient private key via DeriveECIESDecryptKey.
 type EncryptionHeader struct {
-	Version uint8
-	Nonce   [16]byte
+	Version      uint8
+	Nonce        [16]byte
+	EphemeralPub [EphemeralPubKeySize]byte // zero for v1
 }
 
-// NewEncryptionHeader creates a new encryption header with a random nonce.
+// NewEncryptionHeader creates a v1 header with a random nonce.
 func NewEncryptionHeader() (*EncryptionHeader, error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, fmt.Errorf("failed to generate random nonce: %w", err)
 	}
 	return &EncryptionHeader{
-		Version: EncryptionVersion,
+		Version: SymmetricVersion,
 		Nonce:   nonce,
 	}, nil
 }
 
-// ParseEncryptionHeader extracts an encryption header from the given data.
+// NewECIESEncryptionHeader creates a v2 header for the given recipient public key and
+// returns both the header (to be serialized into the encrypted stream) and the 32-byte
+// AES key the caller must use with CryptAt.
+func NewECIESEncryptionHeader(recipientPub *ecdsa.PublicKey) (*EncryptionHeader, [32]byte, error) {
+	var emptyKey [32]byte
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, emptyKey, fmt.Errorf("failed to generate random nonce: %w", err)
+	}
+	aesKey, ephemeralPub, err := DeriveECIESEncryptKey(recipientPub)
+	if err != nil {
+		return nil, emptyKey, err
+	}
+	return &EncryptionHeader{
+		Version:      ECIESVersion,
+		Nonce:        nonce,
+		EphemeralPub: ephemeralPub,
+	}, aesKey, nil
+}
+
+// ParseEncryptionHeader extracts an encryption header from the given data. The caller
+// may then call Size() to learn how many header bytes to skip before the ciphertext.
 func ParseEncryptionHeader(data []byte) (*EncryptionHeader, error) {
-	if len(data) < EncryptionHeaderSize {
-		return nil, fmt.Errorf("data too short for encryption header: %d < %d", len(data), EncryptionHeaderSize)
+	if len(data) < 1 {
+		return nil, fmt.Errorf("data too short for encryption header: %d", len(data))
 	}
 	version := data[0]
-	if version != EncryptionVersion {
+	switch version {
+	case SymmetricVersion:
+		if len(data) < SymmetricHeaderSize {
+			return nil, fmt.Errorf("data too short for v1 encryption header: %d < %d", len(data), SymmetricHeaderSize)
+		}
+		h := &EncryptionHeader{Version: version}
+		copy(h.Nonce[:], data[1:17])
+		return h, nil
+	case ECIESVersion:
+		if len(data) < ECIESHeaderSize {
+			return nil, fmt.Errorf("data too short for v2 encryption header: %d < %d", len(data), ECIESHeaderSize)
+		}
+		h := &EncryptionHeader{Version: version}
+		copy(h.EphemeralPub[:], data[1:1+EphemeralPubKeySize])
+		copy(h.Nonce[:], data[1+EphemeralPubKeySize:1+EphemeralPubKeySize+16])
+		return h, nil
+	default:
 		return nil, fmt.Errorf("unsupported encryption version: %d", version)
 	}
-	var nonce [16]byte
-	copy(nonce[:], data[1:17])
-	return &EncryptionHeader{
-		Version: version,
-		Nonce:   nonce,
-	}, nil
 }
 
-// ToBytes serializes the header to a fixed-size byte array.
-func (h *EncryptionHeader) ToBytes() [EncryptionHeaderSize]byte {
-	var buf [EncryptionHeaderSize]byte
-	buf[0] = h.Version
-	copy(buf[1:17], h.Nonce[:])
-	return buf
+// Size returns the on-wire size of this header (17 for v1, 50 for v2).
+func (h *EncryptionHeader) Size() int {
+	switch h.Version {
+	case ECIESVersion:
+		return ECIESHeaderSize
+	default:
+		return SymmetricHeaderSize
+	}
+}
+
+// ToBytes serializes the header. Length depends on Version (see Size).
+func (h *EncryptionHeader) ToBytes() []byte {
+	switch h.Version {
+	case ECIESVersion:
+		buf := make([]byte, ECIESHeaderSize)
+		buf[0] = h.Version
+		copy(buf[1:1+EphemeralPubKeySize], h.EphemeralPub[:])
+		copy(buf[1+EphemeralPubKeySize:], h.Nonce[:])
+		return buf
+	default:
+		buf := make([]byte, SymmetricHeaderSize)
+		buf[0] = h.Version
+		copy(buf[1:17], h.Nonce[:])
+		return buf
+	}
 }
 
 // CryptAt encrypts or decrypts data in-place at a given byte offset within the plaintext stream.
@@ -109,15 +169,13 @@ func addToCounter(counter []byte, val uint64) {
 // DecryptFile decrypts a full downloaded file: strips the header and decrypts the remaining bytes.
 // Returns the decrypted data without the header.
 func DecryptFile(key *[32]byte, encrypted []byte) ([]byte, error) {
-	if len(encrypted) < EncryptionHeaderSize {
-		return nil, fmt.Errorf("encrypted data too short")
-	}
 	header, err := ParseEncryptionHeader(encrypted)
 	if err != nil {
 		return nil, err
 	}
-	data := make([]byte, len(encrypted)-EncryptionHeaderSize)
-	copy(data, encrypted[EncryptionHeaderSize:])
+	headerSize := header.Size()
+	data := make([]byte, len(encrypted)-headerSize)
+	copy(data, encrypted[headerSize:])
 	CryptAt(key, &header.Nonce, 0, data)
 	return data, nil
 }
@@ -129,11 +187,12 @@ func DecryptFile(key *[32]byte, encrypted []byte) ([]byte, error) {
 // Returns the decrypted plaintext and the updated cumulative data offset.
 func DecryptFragmentData(key *[32]byte, header *EncryptionHeader, fragmentData []byte, isFirstFragment bool, dataOffset uint64) ([]byte, uint64, error) {
 	if isFirstFragment {
-		if len(fragmentData) < EncryptionHeaderSize {
+		headerSize := header.Size()
+		if len(fragmentData) < headerSize {
 			return nil, 0, fmt.Errorf("first fragment too short for encryption header: %d bytes", len(fragmentData))
 		}
-		dataBytes := make([]byte, len(fragmentData)-EncryptionHeaderSize)
-		copy(dataBytes, fragmentData[EncryptionHeaderSize:])
+		dataBytes := make([]byte, len(fragmentData)-headerSize)
+		copy(dataBytes, fragmentData[headerSize:])
 		CryptAt(key, &header.Nonce, 0, dataBytes)
 		return dataBytes, uint64(len(dataBytes)), nil
 	}

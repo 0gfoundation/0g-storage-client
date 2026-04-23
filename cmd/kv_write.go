@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
@@ -14,6 +16,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/transfer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -44,6 +47,7 @@ var (
 		fullTrusted   bool
 		timeout       time.Duration
 		encryptionKey string
+		encrypt       bool
 	}
 
 	kvWriteCmd = &cobra.Command{
@@ -85,7 +89,8 @@ func init() {
 	kvWriteCmd.Flags().UintVar(&kvWriteArgs.nonce, "nonce", 0, "nonce of upload transaction")
 	kvWriteCmd.Flags().StringVar(&kvWriteArgs.method, "method", "random", "method for selecting nodes, can be max, min, random, or positive number, if provided a number, will fail if the requirement cannot be met")
 	kvWriteCmd.Flags().BoolVar(&kvWriteArgs.fullTrusted, "full-trusted", false, "whether all selected nodes should be from trusted nodes")
-	kvWriteCmd.Flags().StringVar(&kvWriteArgs.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 encryption key for encrypting the stream data")
+	kvWriteCmd.Flags().StringVar(&kvWriteArgs.encryptionKey, "encryption-key", "", "Hex-encoded 32-byte AES-256 symmetric key (v1, mutually exclusive with --encrypt)")
+	kvWriteCmd.Flags().BoolVar(&kvWriteArgs.encrypt, "encrypt", false, "Encrypt stream data with ECIES using --key's wallet pubkey (v2, mutually exclusive with --encryption-key)")
 
 	rootCmd.AddCommand(kvWriteCmd)
 }
@@ -114,6 +119,9 @@ func kvWrite(*cobra.Command, []string) {
 	if kvWriteArgs.finalityRequired {
 		finalityRequired = transfer.FileFinalized
 	}
+	if kvWriteArgs.encrypt && kvWriteArgs.encryptionKey != "" {
+		logrus.Fatal("--encrypt and --encryption-key are mutually exclusive")
+	}
 	var encryptionKey []byte
 	if kvWriteArgs.encryptionKey != "" {
 		var err error
@@ -125,12 +133,21 @@ func kvWrite(*cobra.Command, []string) {
 			logrus.Fatalf("Encryption key must be 32 bytes, got %d", len(encryptionKey))
 		}
 	}
+	var recipientPubKey *ecdsa.PublicKey
+	if kvWriteArgs.encrypt {
+		priv, err := crypto.HexToECDSA(strings.TrimPrefix(kvWriteArgs.key, "0x"))
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to parse --key for ECIES encryption")
+		}
+		recipientPubKey = &priv.PublicKey
+	}
 	opt := transfer.UploadOption{
 		TransactionOption: transfer.TransactionOption{
 			Fee:   fee,
 			Nonce: nonce,
 		},
 		EncryptionKey:    encryptionKey,
+		RecipientPubKey:  recipientPubKey,
 		FinalityRequired: finalityRequired,
 		TaskSize:         kvWriteArgs.taskSize,
 		ExpectedReplica:  kvWriteArgs.expectedReplica,

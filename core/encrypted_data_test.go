@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +26,7 @@ func TestEncryptedDataSize(t *testing.T) {
 	encrypted, err := NewEncryptedData(inner, key)
 	require.NoError(t, err)
 
-	assert.Equal(t, inner.Size()+int64(EncryptionHeaderSize), encrypted.Size())
+	assert.Equal(t, inner.Size()+int64(SymmetricHeaderSize), encrypted.Size())
 }
 
 func TestEncryptedDataReadHeader(t *testing.T) {
@@ -44,12 +45,90 @@ func TestEncryptedDataReadHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read just the header
-	buf := make([]byte, EncryptionHeaderSize)
+	buf := make([]byte, SymmetricHeaderSize)
 	n, err := encrypted.Read(buf, 0)
 	require.NoError(t, err)
-	assert.Equal(t, EncryptionHeaderSize, n)
-	assert.Equal(t, byte(EncryptionVersion), buf[0])
+	assert.Equal(t, SymmetricHeaderSize, n)
+	assert.Equal(t, byte(SymmetricVersion), buf[0])
 	assert.Equal(t, encrypted.Header().Nonce[:], buf[1:17])
+}
+
+func TestEncryptedDataECIESFragmentRoundtrip(t *testing.T) {
+	// Produce an encrypted stream large enough to split into fragments, then decrypt
+	// fragment-by-fragment exactly the way the downloader does.
+	original := make([]byte, 500)
+	for i := range original {
+		original[i] = byte(i * 7)
+	}
+	inner, err := NewDataInMemory(original)
+	require.NoError(t, err)
+
+	recipientPriv, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	encrypted, err := NewEncryptedDataECIES(inner, &recipientPriv.PublicKey)
+	require.NoError(t, err)
+
+	// Split into fragments and read each one.
+	fragments := encrypted.Split(200) // encryptedSize = 500 + 50 = 550 -> fragments of 200, 200, 150
+	require.Len(t, fragments, 3)
+
+	fragmentBytes := make([][]byte, len(fragments))
+	for i, f := range fragments {
+		buf := make([]byte, f.Size())
+		n, err := f.Read(buf, 0)
+		require.NoError(t, err)
+		require.Equal(t, int(f.Size()), n)
+		fragmentBytes[i] = buf
+	}
+
+	// Recipient side: parse header from fragment 0, derive key, decrypt each fragment.
+	header, err := ParseEncryptionHeader(fragmentBytes[0])
+	require.NoError(t, err)
+	aesKey, err := DeriveECIESDecryptKey(recipientPriv, header.EphemeralPub)
+	require.NoError(t, err)
+
+	var recovered []byte
+	var offset uint64
+	for i, fb := range fragmentBytes {
+		plaintext, newOffset, err := DecryptFragmentData(&aesKey, header, fb, i == 0, offset)
+		require.NoError(t, err)
+		recovered = append(recovered, plaintext...)
+		offset = newOffset
+	}
+	assert.Equal(t, original, recovered)
+}
+
+func TestEncryptedDataECIESRoundtrip(t *testing.T) {
+	original := []byte("hello world encryption test with ECIES self-encryption path")
+	inner, err := NewDataInMemory(original)
+	require.NoError(t, err)
+
+	recipientPriv, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	encrypted, err := NewEncryptedDataECIES(inner, &recipientPriv.PublicKey)
+	require.NoError(t, err)
+
+	assert.Equal(t, inner.Size()+int64(ECIESHeaderSize), encrypted.Size())
+	assert.Equal(t, uint8(ECIESVersion), encrypted.Header().Version)
+
+	// Read full encrypted stream
+	encryptedSize := int(encrypted.Size())
+	encryptedBuf := make([]byte, encryptedSize)
+	n, err := encrypted.Read(encryptedBuf, 0)
+	require.NoError(t, err)
+	assert.Equal(t, encryptedSize, n)
+
+	// Recipient re-derives the AES key from their private key + the header's ephemeral pubkey
+	header, err := ParseEncryptionHeader(encryptedBuf)
+	require.NoError(t, err)
+	aesKey, err := DeriveECIESDecryptKey(recipientPriv, header.EphemeralPub)
+	require.NoError(t, err)
+
+	decrypted, err := DecryptFile(&aesKey, encryptedBuf)
+	require.NoError(t, err)
+	assert.Equal(t, original, decrypted)
 }
 
 func TestEncryptedDataRoundtrip(t *testing.T) {
@@ -251,7 +330,7 @@ func TestEncryptedDataSplitDecryptRoundtrip(t *testing.T) {
 	}
 
 	// Decrypt fragments using DecryptFragmentData (simulates download decryption)
-	header, err := ParseEncryptionHeader(fragmentDatas[0][:EncryptionHeaderSize])
+	header, err := ParseEncryptionHeader(fragmentDatas[0][:SymmetricHeaderSize])
 	require.NoError(t, err)
 
 	decrypted := make([]byte, 0)
@@ -331,7 +410,7 @@ func TestEncryptedDataSplitMultipleSizes(t *testing.T) {
 					fragmentDatas[i] = buf[:n]
 				}
 
-				header, err := ParseEncryptionHeader(fragmentDatas[0][:EncryptionHeaderSize])
+				header, err := ParseEncryptionHeader(fragmentDatas[0][:SymmetricHeaderSize])
 				require.NoError(t, err)
 
 				decrypted := make([]byte, 0)
@@ -361,7 +440,7 @@ func TestEncryptedDataOneByteRoundtrip(t *testing.T) {
 	encrypted, err := NewEncryptedData(inner, key)
 	require.NoError(t, err)
 
-	assert.Equal(t, int64(1+EncryptionHeaderSize), encrypted.Size())
+	assert.Equal(t, int64(1+SymmetricHeaderSize), encrypted.Size())
 
 	// Read full encrypted stream
 	buf := make([]byte, int(encrypted.Size()))
@@ -404,7 +483,7 @@ func TestEncryptedDataReadPastEnd(t *testing.T) {
 func TestEncryptedDataExactFragmentBoundary(t *testing.T) {
 	// Choose data size so encrypted size (data + 17) exactly equals fragment size
 	fragSize := int64(256)
-	dataSize := int(fragSize - int64(EncryptionHeaderSize)) // 239 bytes
+	dataSize := int(fragSize - int64(SymmetricHeaderSize)) // 239 bytes
 
 	original := make([]byte, dataSize)
 	for i := range original {

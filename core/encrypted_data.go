@@ -1,7 +1,9 @@
 package core
 
+import "crypto/ecdsa"
+
 // EncryptedData wraps an IterableData with AES-256-CTR encryption.
-// It prepends a 17-byte encryption header (version + nonce) to the data stream
+// It prepends the encryption header (v1: 17 bytes, v2: 50 bytes) to the data stream
 // and encrypts the inner data on-the-fly during reads.
 type EncryptedData struct {
 	inner         IterableData
@@ -13,23 +15,36 @@ type EncryptedData struct {
 
 var _ IterableData = (*EncryptedData)(nil)
 
-// NewEncryptedData creates an EncryptedData wrapper around the given data source.
+// NewEncryptedData creates a v1 (symmetric) EncryptedData wrapper around the given data source.
 // A random nonce is generated for the encryption header.
 func NewEncryptedData(inner IterableData, key [32]byte) (*EncryptedData, error) {
 	header, err := NewEncryptionHeader()
 	if err != nil {
 		return nil, err
 	}
-	encryptedSize := inner.Size() + int64(EncryptionHeaderSize)
-	paddedSize := IteratorPaddedSize(encryptedSize, true)
+	return newEncryptedData(inner, key, header), nil
+}
 
+// NewEncryptedDataECIES creates a v2 (asymmetric) EncryptedData wrapper. A fresh ephemeral
+// keypair is generated, ECDH+HKDF derives the AES key, and the ephemeral pubkey is stored
+// in the header so a recipient with recipientPub's private key can recover the AES key.
+func NewEncryptedDataECIES(inner IterableData, recipientPub *ecdsa.PublicKey) (*EncryptedData, error) {
+	header, key, err := NewECIESEncryptionHeader(recipientPub)
+	if err != nil {
+		return nil, err
+	}
+	return newEncryptedData(inner, key, header), nil
+}
+
+func newEncryptedData(inner IterableData, key [32]byte, header *EncryptionHeader) *EncryptedData {
+	encryptedSize := inner.Size() + int64(header.Size())
 	return &EncryptedData{
 		inner:         inner,
 		key:           key,
 		header:        header,
 		encryptedSize: encryptedSize,
-		paddedSize:    paddedSize,
-	}, nil
+		paddedSize:    IteratorPaddedSize(encryptedSize, true),
+	}
 }
 
 // Header returns the encryption header containing the version and nonce.
@@ -65,7 +80,7 @@ func (ed *EncryptedData) Read(buf []byte, offset int64) (int, error) {
 		return 0, nil
 	}
 
-	headerSize := int64(EncryptionHeaderSize)
+	headerSize := int64(ed.header.Size())
 	written := 0
 
 	// If offset falls within the header region
