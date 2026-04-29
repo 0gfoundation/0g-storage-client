@@ -24,6 +24,7 @@ type downloadArgument struct {
 	nodes   []string
 
 	hotRouter  string
+	chainID    int64
 	privateKey string
 
 	root  string
@@ -46,6 +47,7 @@ func bindDownloadFlags(cmd *cobra.Command, args *downloadArgument) {
 	cmd.Flags().StringVar(&args.indexer, "indexer", "", "ZeroGStorage indexer URL")
 
 	cmd.Flags().StringVar(&args.hotRouter, "hot-router", "", "Hot storage router URL for fast download")
+	cmd.Flags().Int64Var(&args.chainID, "chain-id", 16601, "Chain ID for EIP-712 domain separator on hot storage download auth (must match the router's configured chain)")
 	cmd.Flags().StringVar(&args.privateKey, "private-key", "", "User's private key for signing hot storage download requests")
 
 	cmd.Flags().StringVar(&args.root, "root", "", "Merkle root to download file")
@@ -159,7 +161,7 @@ func download(*cobra.Command, []string) {
 	// Build the hot downloader if hot-router is specified.
 	if downloadArgs.hotRouter != "" {
 		privateKey := mustParsePrivateKey(downloadArgs.privateKey)
-		routerClient := node.NewHotRouterClient(downloadArgs.hotRouter)
+		routerClient := node.NewHotRouterClient(downloadArgs.hotRouter, downloadArgs.chainID)
 		hotDownloader := transfer.NewHotDownloader(routerClient, privateKey, baseDownloader, common.LogOption{Logger: logrus.StandardLogger()})
 		if downloadArgs.encryptionKey != "" {
 			keyBytes := mustDecodeEncryptionKey(downloadArgs.encryptionKey)

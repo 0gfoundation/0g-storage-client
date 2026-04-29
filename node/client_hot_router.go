@@ -7,46 +7,114 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
+
+// EIP-712 domain parameters. These MUST match the router/frontend byte-for-byte
+// — any drift breaks signature recovery silently. The router has its own copy
+// in 0g-hot-storage-router/internal/router/eip712.go and a cross-language
+// canary in test/eip712_vector.py; keep all three in sync.
+const (
+	hotDownloadDomainName    = "0G Storage Scan"
+	hotDownloadDomainVersion = "1"
+)
+
+// hotDownloadAuthTypes is the EIP-712 type set the router accepts for download
+// authorization. Wallets render these as labeled fields rather than an opaque
+// hex blob.
+var hotDownloadAuthTypes = apitypes.Types{
+	"EIP712Domain": []apitypes.Type{
+		{Name: "name", Type: "string"},
+		{Name: "version", Type: "string"},
+		{Name: "chainId", Type: "uint256"},
+	},
+	"HotDownloadAuth": []apitypes.Type{
+		{Name: "user", Type: "address"},
+		{Name: "fileHashes", Type: "bytes32[]"},
+		{Name: "nonce", Type: "uint256"},
+	},
+}
 
 // HotRouterClient is an HTTP client for the hot storage router.
 type HotRouterClient struct {
 	url        string
+	chainID    int64
 	httpClient *http.Client
 }
 
-// NewHotRouterClient creates a new hot storage router client.
-func NewHotRouterClient(url string) *HotRouterClient {
+// NewHotRouterClient creates a new hot storage router client. chainID is used
+// for the EIP-712 domain separator on download auth signatures and must match
+// the router's configured chain ID.
+func NewHotRouterClient(url string, chainID int64) *HotRouterClient {
 	return &HotRouterClient{
-		url: url,
+		url:     url,
+		chainID: chainID,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
 }
 
-// signDownloadRequest signs the download request using standard EIP-191 personal_sign.
-// hash = keccak256("\x19Ethereum Signed Message:\n" + len(data) + data)
-// where data = user_bytes || hash1_bytes || ... || hashN_bytes || nonce_32bytes
-func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, fileHashes []common.Hash, nonce uint64) ([]byte, error) {
-	data := make([]byte, 0, 20+32*len(fileHashes)+32)
-	data = append(data, user.Bytes()...)
-	for _, h := range fileHashes {
-		data = append(data, h.Bytes()...)
+// hashHotDownloadAuth computes the EIP-712 digest a user signs over for a
+// /download request. Result is keccak256(0x1901 || domainSeparator || hashStruct(message)).
+func hashHotDownloadAuth(user common.Address, fileHashes []common.Hash, nonce uint64, chainID int64) (common.Hash, error) {
+	hashes := make([]interface{}, len(fileHashes))
+	for i, h := range fileHashes {
+		hashes[i] = hexutil.Bytes(h.Bytes())
 	}
-	data = append(data, common.LeftPadBytes(new(big.Int).SetUint64(nonce).Bytes(), 32)...)
+	td := apitypes.TypedData{
+		Types:       hotDownloadAuthTypes,
+		PrimaryType: "HotDownloadAuth",
+		Domain: apitypes.TypedDataDomain{
+			Name:    hotDownloadDomainName,
+			Version: hotDownloadDomainVersion,
+			ChainId: math.NewHexOrDecimal256(chainID),
+		},
+		Message: apitypes.TypedDataMessage{
+			"user":       user.Hex(),
+			"fileHashes": hashes,
+			"nonce":      math.NewHexOrDecimal256(int64(nonce)),
+		},
+	}
 
-	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(data))
-	signingHash := crypto.Keccak256Hash([]byte(prefix), data)
-	sig, err := crypto.Sign(signingHash.Bytes(), privateKey)
+	domainSep, err := td.HashStruct("EIP712Domain", td.Domain.Map())
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("hash domain: %w", err)
+	}
+	msgHash, err := td.HashStruct(td.PrimaryType, td.Message)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("hash message: %w", err)
+	}
+
+	preimage := make([]byte, 0, 2+32+32)
+	preimage = append(preimage, 0x19, 0x01)
+	preimage = append(preimage, domainSep...)
+	preimage = append(preimage, msgHash...)
+	return crypto.Keccak256Hash(preimage), nil
+}
+
+// signDownloadRequest signs the download request as EIP-712 typed data over
+// the HotDownloadAuth message.
+func signDownloadRequest(privateKey *ecdsa.PrivateKey, user common.Address, fileHashes []common.Hash, nonce uint64, chainID int64) ([]byte, error) {
+	hash, err := hashHotDownloadAuth(user, fileHashes, nonce, chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash download auth: %w", err)
+	}
+	sig, err := crypto.Sign(hash.Bytes(), privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign download request: %w", err)
+	}
+	// Convert recovery byte from 0/1 (go-ethereum) to 27/28 (EIP-155 / EIP-712
+	// canonical), so the router's recoverSigner — which subtracts 27 — agrees.
+	if sig[64] < 27 {
+		sig[64] += 27
 	}
 	return sig, nil
 }
@@ -65,7 +133,7 @@ func (c *HotRouterClient) GetDownloadAuth(ctx context.Context, privateKey *ecdsa
 		fileHashHexes[i] = fileHashes[i].Hex()
 	}
 
-	sig, err := signDownloadRequest(privateKey, user, fileHashes, nonce)
+	sig, err := signDownloadRequest(privateKey, user, fileHashes, nonce, c.chainID)
 	if err != nil {
 		return nil, err
 	}

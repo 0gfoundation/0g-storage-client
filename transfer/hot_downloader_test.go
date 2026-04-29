@@ -95,7 +95,7 @@ func TestHotDownloader_CacheHit(t *testing.T) {
 	defer router.Close()
 
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient(router.URL)
+	routerClient := node.NewHotRouterClient(router.URL, 16601)
 
 	fallbackCalled := false
 	fallback := &mockFallbackDownloader{
@@ -124,7 +124,7 @@ func TestHotDownloader_CacheMiss_FallbackCalled(t *testing.T) {
 	defer router.Close()
 
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient(router.URL)
+	routerClient := node.NewHotRouterClient(router.URL, 16601)
 
 	fallbackContent := []byte("fallback content")
 	fallback := &mockFallbackDownloader{
@@ -154,7 +154,7 @@ func TestHotDownloader_RouterDown_FallbackCalled(t *testing.T) {
 	defer router.Close()
 
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient(router.URL)
+	routerClient := node.NewHotRouterClient(router.URL, 16601)
 
 	fallbackContent := []byte("fallback on router error")
 	fallback := &mockFallbackDownloader{
@@ -185,7 +185,7 @@ func TestHotDownloader_DownloadFragments_AllCached(t *testing.T) {
 	defer router.Close()
 
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient(router.URL)
+	routerClient := node.NewHotRouterClient(router.URL, 16601)
 
 	fallbackCalled := false
 	fallback := &mockFallbackDownloader{
@@ -222,7 +222,7 @@ func TestHotDownloader_DownloadFragments_AllCacheMiss(t *testing.T) {
 	defer router.Close()
 
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient(router.URL)
+	routerClient := node.NewHotRouterClient(router.URL, 16601)
 
 	fallbackData := []byte("fallback fragment")
 	fallback := &mockFallbackDownloader{
@@ -253,7 +253,7 @@ func TestHotDownloader_ImplementsIDownloader(t *testing.T) {
 
 func TestHotDownloader_WithEncryptionKey(t *testing.T) {
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient("http://unused")
+	routerClient := node.NewHotRouterClient("http://unused", 16601)
 	fallback := &mockFallbackDownloader{}
 
 	downloader := NewHotDownloader(routerClient, key, fallback)
@@ -279,7 +279,7 @@ func TestHotDownloader_CacheHit_LargeFile(t *testing.T) {
 	defer router.Close()
 
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient(router.URL)
+	routerClient := node.NewHotRouterClient(router.URL, 16601)
 	fallback := &mockFallbackDownloader{}
 
 	downloader := NewHotDownloader(routerClient, key, fallback)
@@ -303,7 +303,7 @@ func TestHotDownloader_ContextCanceled(t *testing.T) {
 	defer router.Close()
 
 	key := testKey(t)
-	routerClient := node.NewHotRouterClient(router.URL)
+	routerClient := node.NewHotRouterClient(router.URL, 16601)
 
 	fallback := &mockFallbackDownloader{
 		downloadFunc: func(ctx context.Context, root, filename string, withProof bool) error {
