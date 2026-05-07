@@ -5,7 +5,10 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/common/rpc"
@@ -34,6 +37,12 @@ type Client struct {
 	logger           *logrus.Logger
 	encryptionKey    []byte            // optional 32-byte AES-256 decryption key (v1 symmetric)
 	walletPrivateKey *ecdsa.PrivateKey // optional wallet private key for ECIES v2 decryption
+
+	// EstimateFee cache state. See client_estimate.go.
+	estimateMu     sync.Mutex
+	estimateTTL    time.Duration
+	estimatePrice  *big.Int
+	estimateLoaded time.Time
 }
 
 // IndexerClientOption indexer client option
