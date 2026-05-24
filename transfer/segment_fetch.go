@@ -49,6 +49,12 @@ func fetchSegmentFromNode(
 		if sw == nil {
 			return nil, nil
 		}
+		// Pre-validate the data length against the requested chunk range.
+		// download_parallel.go used to enforce this inline; preserve it
+		// here so both download paths get the same guarantee.
+		if expected := (endChunk - startChunk) * core.DefaultChunkSize; int(expected) != len(sw.Data) {
+			return nil, errors.Errorf("downloaded data length mismatch: expected %d, got %d", expected, len(sw.Data))
+		}
 		segRoot, numSegPad := core.PaddedSegmentRoot(segIdx, sw.Data, fileSize)
 		if err := sw.Proof.ValidateHash(root, segRoot, segIdx, numSegPad); err != nil {
 			return nil, errors.WithMessage(err, "proof validation")
