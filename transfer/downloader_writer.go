@@ -5,7 +5,6 @@ import (
 	"io"
 
 	"github.com/0gfoundation/0g-storage-client/core"
-	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/pkg/errors"
 )
@@ -130,8 +129,12 @@ func (downloader *Downloader) downloadRangeToWriter(ctx context.Context, root st
 }
 
 // fetchSegmentBytes downloads a single segment from any storage node that
-// holds it (per shard config) and validates the proof if requested. Tries
+// holds it (per shard config), validating the proof if requested. Tries
 // each client in turn; the last error wins on total failure.
+//
+// The shard-skip + fetch + validate per-node logic lives in
+// fetchSegmentFromNode (segment_fetch.go); this method is just the
+// "try each client" loop.
 func (downloader *Downloader) fetchSegmentBytes(
 	ctx context.Context,
 	txSeq uint64,
@@ -143,51 +146,17 @@ func (downloader *Downloader) fetchSegmentBytes(
 	var lastErr error
 	for i := 0; i < len(downloader.clients); i++ {
 		client := downloader.clients[i]
-		if data, err := tryFetchSegment(ctx, client, txSeq, root, segIdx, globalSegIdx, startChunk, endChunk, withProof, fileSize); err == nil {
-			if data != nil {
-				return data, nil
-			}
-		} else {
+		data, err := fetchSegmentFromNode(ctx, client, txSeq, root, segIdx, globalSegIdx, startChunk, endChunk, withProof, fileSize)
+		if err != nil {
 			lastErr = err
+			continue
+		}
+		if data != nil {
+			return data, nil
 		}
 	}
 	if lastErr != nil {
 		return nil, errors.WithMessage(lastErr, "all nodes failed")
 	}
 	return nil, errors.Errorf("no node served segment %d", segIdx)
-}
-
-func tryFetchSegment(
-	ctx context.Context,
-	client *node.ZgsClient,
-	txSeq uint64,
-	root common.Hash,
-	segIdx, globalSegIdx, startChunk, endChunk uint64,
-	withProof bool,
-	fileSize int64,
-) ([]byte, error) {
-	if sc := client.ShardConfig(); sc != nil && sc.NumShard > 0 {
-		if globalSegIdx%sc.NumShard != sc.ShardId {
-			return nil, nil // this node doesn't shard this segment; not an error
-		}
-	}
-	if withProof {
-		sw, err := client.DownloadSegmentWithProofByTxSeq(ctx, txSeq, segIdx)
-		if err != nil {
-			return nil, err
-		}
-		if sw == nil {
-			return nil, nil
-		}
-		segRoot, numSegPad := core.PaddedSegmentRoot(segIdx, sw.Data, fileSize)
-		if err := sw.Proof.ValidateHash(root, segRoot, segIdx, numSegPad); err != nil {
-			return nil, errors.WithMessage(err, "proof validation")
-		}
-		return sw.Data, nil
-	}
-	data, err := client.DownloadSegmentByTxSeq(ctx, txSeq, startChunk, endChunk)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
 }
