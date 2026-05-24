@@ -71,7 +71,7 @@ func (downloader *Downloader) downloadRangeToWriter(ctx context.Context, root st
 
 	endByte := offset + length // exclusive
 	startChunk := uint64(offset / chunkSize)
-	endChunkExcl := uint64((endByte + chunkSize - 1) / chunkSize)
+	endChunkExcl := core.NumSplits(endByte, core.DefaultChunkSize)
 	if endChunkExcl > fileNumChunks {
 		endChunkExcl = fileNumChunks
 	}
