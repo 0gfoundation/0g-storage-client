@@ -105,9 +105,16 @@ func (downloader *segmentDownloader) ParallelDo(ctx context.Context, routine, ta
 		// Shard-skip + RPC + (optional) proof-validation all happen
 		// inside fetchSegmentFromNode (segment_fetch.go). This is the
 		// single source of truth shared with downloader_writer.go.
-		segment, err := fetchSegmentFromNode(ctx, client, downloader.txSeq, root,
-			segmentIndex, globalSegIdx, startIndex, endIndex,
-			downloader.withProof, fileSize)
+		segment, err := fetchSegmentFromNode(ctx, client, segmentFetchRequest{
+			TxSeq:        downloader.txSeq,
+			Root:         root,
+			FileSize:     fileSize,
+			SegIdx:       segmentIndex,
+			GlobalSegIdx: globalSegIdx,
+			StartChunk:   startIndex,
+			EndChunk:     endIndex,
+			WithProof:    downloader.withProof,
+		})
 		if err != nil {
 			downloader.logger.WithError(err).WithFields(logCtx(nodeIndex)).Error("Failed to download segment")
 			continue

@@ -9,6 +9,32 @@ import (
 	"github.com/pkg/errors"
 )
 
+// segmentFetchRequest is the parameter bundle for fetchSegmentFromNode.
+// Grouped because the per-node fetch needs file-level (TxSeq, Root,
+// FileSize), segment-level (SegIdx, GlobalSegIdx, StartChunk, EndChunk),
+// and mode (WithProof) inputs — passing them as positional args was a
+// 10-arg smell.
+type segmentFetchRequest struct {
+	// Identifies the file on chain.
+	TxSeq    uint64
+	Root     common.Hash
+	FileSize int64
+
+	// Identifies the segment within the file. SegIdx is the local
+	// per-file segment index (also the index used by the proof RPC).
+	// GlobalSegIdx is the flow-wide segment index used for shard
+	// distribution math: GlobalSegIdx % NumShard == ShardId for nodes
+	// that hold this segment.
+	SegIdx       uint64
+	GlobalSegIdx uint64
+	StartChunk   uint64
+	EndChunk     uint64
+
+	// WithProof requests a Merkle proof and validates it against Root
+	// before returning the data.
+	WithProof bool
+}
+
 // fetchSegmentFromNode downloads one segment from a single ZgsClient,
 // applying the shard-config skip and (optionally) the proof validation.
 //
@@ -24,25 +50,17 @@ import (
 // Used by both download_parallel.go (file-based parallel download) and
 // downloader_writer.go (io.Writer-based streaming download) so the
 // shard-skip and proof-validation paths live in exactly one place.
-func fetchSegmentFromNode(
-	ctx context.Context,
-	client *node.ZgsClient,
-	txSeq uint64,
-	root common.Hash,
-	segIdx, globalSegIdx, startChunk, endChunk uint64,
-	withProof bool,
-	fileSize int64,
-) ([]byte, error) {
+func fetchSegmentFromNode(ctx context.Context, client *node.ZgsClient, req segmentFetchRequest) ([]byte, error) {
 	sc := client.ShardConfig()
 	if sc == nil {
 		return nil, errors.New("ShardConfig is required on ZgsClient")
 	}
-	if sc.NumShard > 0 && globalSegIdx%sc.NumShard != sc.ShardId {
+	if sc.NumShard > 0 && req.GlobalSegIdx%sc.NumShard != sc.ShardId {
 		return nil, nil // this node doesn't shard this segment; not an error
 	}
 
-	if withProof {
-		sw, err := client.DownloadSegmentWithProofByTxSeq(ctx, txSeq, segIdx)
+	if req.WithProof {
+		sw, err := client.DownloadSegmentWithProofByTxSeq(ctx, req.TxSeq, req.SegIdx)
 		if err != nil {
 			return nil, err
 		}
@@ -52,15 +70,15 @@ func fetchSegmentFromNode(
 		// Pre-validate the data length against the requested chunk range.
 		// download_parallel.go used to enforce this inline; preserve it
 		// here so both download paths get the same guarantee.
-		if expected := (endChunk - startChunk) * core.DefaultChunkSize; int(expected) != len(sw.Data) {
+		if expected := (req.EndChunk - req.StartChunk) * core.DefaultChunkSize; int(expected) != len(sw.Data) {
 			return nil, errors.Errorf("downloaded data length mismatch: expected %d, got %d", expected, len(sw.Data))
 		}
-		segRoot, numSegPad := core.PaddedSegmentRoot(segIdx, sw.Data, fileSize)
-		if err := sw.Proof.ValidateHash(root, segRoot, segIdx, numSegPad); err != nil {
+		segRoot, numSegPad := core.PaddedSegmentRoot(req.SegIdx, sw.Data, req.FileSize)
+		if err := sw.Proof.ValidateHash(req.Root, segRoot, req.SegIdx, numSegPad); err != nil {
 			return nil, errors.WithMessage(err, "proof validation")
 		}
 		return sw.Data, nil
 	}
 
-	return client.DownloadSegmentByTxSeq(ctx, txSeq, startChunk, endChunk)
+	return client.DownloadSegmentByTxSeq(ctx, req.TxSeq, req.StartChunk, req.EndChunk)
 }

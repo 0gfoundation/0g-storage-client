@@ -146,7 +146,16 @@ func (downloader *Downloader) fetchSegmentBytes(
 	var lastErr error
 	for i := 0; i < len(downloader.clients); i++ {
 		client := downloader.clients[i]
-		data, err := fetchSegmentFromNode(ctx, client, txSeq, root, segIdx, globalSegIdx, startChunk, endChunk, withProof, fileSize)
+		data, err := fetchSegmentFromNode(ctx, client, segmentFetchRequest{
+			TxSeq:        txSeq,
+			Root:         root,
+			FileSize:     fileSize,
+			SegIdx:       segIdx,
+			GlobalSegIdx: globalSegIdx,
+			StartChunk:   startChunk,
+			EndChunk:     endChunk,
+			WithProof:    withProof,
+		})
 		if err != nil {
 			lastErr = err
 			continue
