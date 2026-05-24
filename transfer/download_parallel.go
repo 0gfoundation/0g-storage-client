@@ -33,8 +33,7 @@ type segmentDownloader struct {
 var _ parallel.Interface = (*segmentDownloader)(nil)
 
 func newSegmentDownloader(downloader *Downloader, info *node.FileInfo, file *download.DownloadingFile, withProof bool) (*segmentDownloader, error) {
-	startSegmentIndex := info.Tx.StartEntryIndex / core.DefaultSegmentMaxChunks
-	endSegmentIndex := (info.Tx.StartEntryIndex + core.NumSplits(int64(info.Tx.Size), core.DefaultChunkSize) - 1) / core.DefaultSegmentMaxChunks
+	startSegmentIndex, endSegmentIndex := core.SegmentRange(info.Tx.StartEntryIndex, info.Tx.Size)
 
 	logrus.WithFields(logrus.Fields{
 		"size":              info.Tx.Size,

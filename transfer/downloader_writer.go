@@ -67,7 +67,10 @@ func (downloader *Downloader) downloadRangeToWriter(ctx context.Context, root st
 	segChunks := uint64(core.DefaultSegmentMaxChunks)
 
 	fileNumChunks := core.NumSplits(fileSize, core.DefaultChunkSize)
-	globalStartSeg := info.Tx.StartEntryIndex / segChunks
+	// Flow-wide segment index of the file's first segment — used to
+	// turn file-relative segment indices into the global indices that
+	// fetchSegmentFromNode needs for shard distribution.
+	globalStartSeg, _ := core.SegmentRange(info.Tx.StartEntryIndex, uint64(fileSize))
 
 	endByte := offset + length // exclusive
 	startChunk := uint64(offset / chunkSize)
