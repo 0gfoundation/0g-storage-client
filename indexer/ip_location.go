@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -13,6 +14,14 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
+
+// ipLocationHTTPTimeout bounds the ipinfo.io GET so indexer startup
+// can't hang on a slow / blocked external network. The Query result
+// is non-fatal (caller logs Warn and continues), so failing fast is
+// strictly an improvement.
+const ipLocationHTTPTimeout = 5 * time.Second
+
+var ipLocationHTTPClient = &http.Client{Timeout: ipLocationHTTPTimeout}
 
 var defaultIPLocationManager = IPLocationManager{}
 
@@ -78,6 +87,13 @@ func (manager *IPLocationManager) Query(ip string) (*IPLocation, error) {
 		return loc.(*IPLocation), nil
 	}
 
+	// Skip loopback / private RFC-1918 / link-local addresses. They have
+	// no useful geo info, and the lookup is the bottleneck that hangs
+	// indexer startup when ipinfo.io is slow/blocked (see #143).
+	if isNonRoutableIP(ip) {
+		return nil, nil
+	}
+
 	var url string
 	if len(manager.config.AccessToken) == 0 {
 		url = fmt.Sprintf("http://ipinfo.io/%v/json", ip)
@@ -85,7 +101,7 @@ func (manager *IPLocationManager) Query(ip string) (*IPLocation, error) {
 		url = fmt.Sprintf("http://ipinfo.io/%v/json?token=%v", ip, manager.config.AccessToken)
 	}
 
-	resp, err := http.Get(url)
+	resp, err := ipLocationHTTPClient.Get(url)
 	if err != nil {
 		return nil, errors.WithMessagef(err, "Failed to http GET from %v", url)
 	}
@@ -117,6 +133,17 @@ func (manager *IPLocationManager) Query(ip string) (*IPLocation, error) {
 	}
 
 	return &loc, nil
+}
+
+// isNonRoutableIP reports whether ip is a loopback, link-local, or
+// private RFC-1918 / ULA address — anything for which an external
+// geo-lookup against ipinfo.io would be pointless.
+func isNonRoutableIP(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false // unparseable input — let the caller hit the API (or fail)
+	}
+	return parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsLinkLocalUnicast() || parsed.IsLinkLocalMulticast() || parsed.IsUnspecified()
 }
 
 // read reads IP locations from cache file.
