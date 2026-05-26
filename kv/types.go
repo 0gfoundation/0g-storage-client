@@ -69,6 +69,23 @@ type StreamData struct {
 	Controls []accessControl
 }
 
+// EncodedSizeForSingleWrite returns the exact byte count that
+// StreamData.Encode() would produce for a stream-data blob containing
+// exactly one streamWrite (no reads, no access controls).
+//
+// Intended for pricing pre-flight on gateways that wrap the KV API:
+// the caller knows the (key, data) lengths it will submit but not yet
+// the actual bytes, and needs the encoded size to compute storage
+// cost. Mirrors (*StreamData).Size() for the single-write case —
+// kept in sync via TestEncodedSizeForSingleWriteMatchesSize.
+func EncodedSizeForSingleWrite(keyLen, dataLen int) int {
+	// version(8) + reads_count(4) + writes_count(4)
+	//   + one streamWrite: HashLength + 3 (24-bit keySize) + keyLen
+	//                      + 8 (64-bit dataSize) + dataLen
+	//   + acls_count(4)
+	return 8 + 4 + 4 + common.HashLength + 3 + keyLen + 8 + dataLen + 4
+}
+
 // Size returns the serialized data size in bytes.
 func (sd *StreamData) Size() int {
 	var size int
