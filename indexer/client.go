@@ -163,6 +163,20 @@ func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, d
 			return txHashes, roots, nil
 		}
 
+		// If Flow.submit already succeeded on a previous attempt
+		// (txHashes is non-empty), tell the next iteration not to
+		// redo it — otherwise we pay storage fee + gas a second time
+		// for the same content, leaking the caller's wallet on every
+		// transient segment-upload failure. uploader.uploadSlow /
+		// uploadFast only honors opt.SkipTx when the storage node also
+		// confirms the entry is on chain (checkLogExistence != nil),
+		// so this is best-effort dedup: if the new uploader's nodes
+		// haven't synced the previous submit yet, we'll fall back to
+		// a fresh submit — no worse than today.
+		if len(txHashes) > 0 {
+			opt.SkipTx = true
+		}
+
 		if !opt.FullTrusted {
 			opt.FullTrusted = true
 			c.logger.WithError(err).Warn("Upload failed, retrying with full trusted nodes")
