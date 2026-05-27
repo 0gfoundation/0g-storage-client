@@ -235,11 +235,19 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 	rootHashes := make([]common.Hash, 0)
 	if data.Size() <= fragmentSize {
 		txHash, rootHash, err := uploader.uploadInner(ctx, data, opt)
+		// Surface the Flow.submit hash even on segment-upload failure
+		// so the retry wrapper in indexer/Client.SplitableUpload can
+		// see "submit already succeeded" and set opt.SkipTx = true
+		// on the next attempt. Otherwise the operator wallet pays
+		// Flow.submit again for the same content on every transient
+		// segment-upload retry. See #148.
+		if (txHash != common.Hash{}) {
+			txHashes = append(txHashes, txHash)
+			rootHashes = append(rootHashes, rootHash)
+		}
 		if err != nil {
 			return txHashes, rootHashes, err
 		}
-		txHashes = append(txHashes, txHash)
-		rootHashes = append(rootHashes, rootHash)
 	} else {
 		totalSize := data.Size()
 		fragments := data.Split(fragmentSize)
@@ -272,11 +280,16 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 				batchOpt.DataOptions = append(batchOpt.DataOptions, opt)
 			}
 			txHash, roots, err := uploader.BatchUpload(ctx, fragments[l:r], batchOpt)
+			// Same partial-progress logic as the single-fragment
+			// branch: surface a non-zero batch txHash on error so
+			// the retry wrapper can skip a re-submit. See #148.
+			if (txHash != common.Hash{}) {
+				txHashes = append(txHashes, txHash)
+				rootHashes = append(rootHashes, roots...)
+			}
 			if err != nil {
 				return txHashes, rootHashes, err
 			}
-			txHashes = append(txHashes, txHash)
-			rootHashes = append(rootHashes, roots...)
 		}
 	}
 	return txHashes, rootHashes, nil
