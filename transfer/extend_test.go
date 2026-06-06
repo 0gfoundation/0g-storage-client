@@ -72,18 +72,19 @@ func buildSubmitLog(t *testing.T, sub contract.Submission) *ethtypes.Log {
 	)
 	require.NoError(t, err)
 
-	identity := sub.Root() // indexed identity == data root
+	// On-chain `identity` is NOT the bare data root; use a deliberately different value
+	// to prove parseSubmissions derives the root from the submission, not from identity.
 	return &ethtypes.Log{
 		Topics: []common.Hash{
-			ev.ID,                    // event signature
-			common.HexToHash("0x00"), // indexed sender (zero)
-			identity,                 // indexed identity
+			ev.ID,                          // event signature
+			common.HexToHash("0x00"),       // indexed sender (zero)
+			common.HexToHash("0xfeedface"), // indexed identity (arbitrary, must be ignored)
 		},
 		Data: data,
 	}
 }
 
-func TestParseSubmissions_DedupesAndVerifiesRoot(t *testing.T) {
+func TestParseSubmissions_DedupesAndUsesSubmissionRoot(t *testing.T) {
 	flow := newTestFlow(t)
 	sub := newTestSubmission(t, 4096)
 	log := buildSubmitLog(t, sub)
@@ -91,7 +92,9 @@ func TestParseSubmissions_DedupesAndVerifiesRoot(t *testing.T) {
 	items, err := parseSubmissions(flow, []*ethtypes.Log{log, log}) // duplicate => one item
 	require.NoError(t, err)
 	require.Len(t, items, 1)
+	// Root must come from the submission's own nodes, NOT the event identity (0xfeedface).
 	assert.Equal(t, sub.Root(), items[0].Root)
+	assert.NotEqual(t, common.HexToHash("0xfeedface"), items[0].Root)
 	assert.Equal(t, sub.Data.Length, items[0].Submission.Data.Length)
 }
 

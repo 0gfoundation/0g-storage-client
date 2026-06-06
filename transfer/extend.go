@@ -19,9 +19,9 @@ type ExtendOption struct {
 	TransactionOption // Submitter, Fee, Nonce, MaxGasPrice, NRetries, Step
 
 	Method          string // node-selection method for availability checks ("random", "min", ...)
-	ExpectedReplica uint    // expected replicas when selecting nodes via the indexer
-	FullTrusted     bool    // whether to use full trusted nodes when selecting via the indexer
-	BatchSize       uint    // submissions per batchSubmit tx (0 => defaultBatchSize)
+	ExpectedReplica uint   // expected replicas when selecting nodes via the indexer
+	FullTrusted     bool   // whether to use full trusted nodes when selecting via the indexer
+	BatchSize       uint   // submissions per batchSubmit tx (0 => defaultBatchSize)
 }
 
 // ExtendItem pairs a recovered file data root with the submission used to re-pay for it.
@@ -62,8 +62,8 @@ func isRootAvailable(info *node.FileInfo) bool {
 }
 
 // parseSubmissions extracts every Flow Submit event from the given (go-ethereum) logs and
-// returns one ExtendItem per distinct data root. Each submission's derived root is verified
-// against the event's indexed identity; mismatches are skipped defensively.
+// returns one ExtendItem per distinct data root, where the root is derived from the
+// submission's own nodes via Submission.Root().
 func parseSubmissions(flow *contract.FlowContract, logs []*ethtypes.Log) ([]ExtendItem, error) {
 	seen := make(map[common.Hash]struct{})
 	items := make([]ExtendItem, 0, len(logs))
@@ -73,10 +73,12 @@ func parseSubmissions(flow *contract.FlowContract, logs []*ethtypes.Log) ([]Exte
 			continue // not a Submit log
 		}
 		sub := contract.Submission{Data: ev.Submission}
+		// The data root is derived from the submission's own nodes (Submission.Root()
+		// == core.MerkleTree(data).Root() == the key storage nodes/indexer use). We do
+		// NOT compare against the event's indexed `identity`: on-chain `identity` is a
+		// different digest, not the bare data root, so matching against it would wrongly
+		// drop every valid submission.
 		root := sub.Root()
-		if root != common.BytesToHash(ev.Identity[:]) {
-			continue // identity mismatch; ignore defensively
-		}
 		if _, ok := seen[root]; ok {
 			continue
 		}
