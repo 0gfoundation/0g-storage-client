@@ -235,19 +235,25 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 	rootHashes := make([]common.Hash, 0)
 	if data.Size() <= fragmentSize {
 		txHash, rootHash, err := uploader.uploadInner(ctx, data, opt)
-		// Surface the Flow.submit hash even on segment-upload failure
-		// so the retry wrapper in indexer/Client.SplitableUpload can
-		// see "submit already succeeded" and set opt.SkipTx = true
-		// on the next attempt. Otherwise the operator wallet pays
-		// Flow.submit again for the same content on every transient
-		// segment-upload retry. See #148.
-		if (txHash != common.Hash{}) {
-			txHashes = append(txHashes, txHash)
-			rootHashes = append(rootHashes, rootHash)
-		}
 		if err != nil {
+			// On error, surface the Flow.submit hash only if a submit
+			// actually happened, so the retry wrapper in
+			// indexer/Client.SplitableUpload can see "submit already
+			// succeeded" and set opt.SkipTx = true on the next attempt.
+			// Otherwise the operator wallet pays Flow.submit again for the
+			// same content on every transient segment-upload retry. See #148.
+			if (txHash != common.Hash{}) {
+				txHashes = append(txHashes, txHash)
+				rootHashes = append(rootHashes, rootHash)
+			}
 			return txHashes, rootHashes, err
 		}
+		// On success, always return the root, even when the on-chain submit
+		// was skipped (txHash is zero for already-settled data uploaded with
+		// SkipTx). Gating the root on a non-zero txHash dropped it for skip-tx
+		// uploads. See #155.
+		txHashes = append(txHashes, txHash)
+		rootHashes = append(rootHashes, rootHash)
 	} else {
 		totalSize := data.Size()
 		fragments := data.Split(fragmentSize)
@@ -280,16 +286,21 @@ func (uploader *Uploader) SplitableUpload(ctx context.Context, data core.Iterabl
 				batchOpt.DataOptions = append(batchOpt.DataOptions, opt)
 			}
 			txHash, roots, err := uploader.BatchUpload(ctx, fragments[l:r], batchOpt)
-			// Same partial-progress logic as the single-fragment
-			// branch: surface a non-zero batch txHash on error so
-			// the retry wrapper can skip a re-submit. See #148.
-			if (txHash != common.Hash{}) {
-				txHashes = append(txHashes, txHash)
-				rootHashes = append(rootHashes, roots...)
-			}
 			if err != nil {
+				// Same partial-progress logic as the single-fragment
+				// branch: surface a non-zero batch txHash on error so
+				// the retry wrapper can skip a re-submit. See #148.
+				if (txHash != common.Hash{}) {
+					txHashes = append(txHashes, txHash)
+					rootHashes = append(rootHashes, roots...)
+				}
 				return txHashes, rootHashes, err
 			}
+			// On success, always return the batch roots, even when the
+			// on-chain submit was skipped (zero txHash for already-settled
+			// data uploaded with SkipTx). See #155.
+			txHashes = append(txHashes, txHash)
+			rootHashes = append(rootHashes, roots...)
 		}
 	}
 	return txHashes, rootHashes, nil
