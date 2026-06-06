@@ -61,6 +61,7 @@ The CLI provides a comprehensive set of commands for storage operations:
 
 Available Commands:
   upload      Upload file to 0G Storage network
+  extend      Extend the storage period of already-stored data (re-pay, no re-upload)
   download    Download file from 0G Storage network
   upload-dir  Upload directory to 0G Storage network
   download-dir Download directory from 0G Storage network
@@ -111,6 +112,38 @@ Common flags include `--tags`, `--submitter`, `--expected-replica`, `--skip-tx`,
 Fee notes (turbo):
 - `unitPrice = 11 / pricePerToken / 1024 * 256`. If `pricePerToken = 1`, then `unitPrice = 2.75` (tokens), or `2.75e18` a0gi.
 - `pricePerSector(256B)/month = lifetimeMonth * unitPrice * 1e18 / 1024 / 1024 / 1024` (no `/12` since $11 is per TB per month).
+
+### Extend Storage Period
+
+Storage is paid for a fixed period (~1 year) at upload time. `extend` pays the protocol fee
+again for data that is **already on the network**, keeping it stored for another period
+**without re-uploading the bytes**. Identify the data by the `Flow.submit` transaction
+hash(es) returned when it was uploaded (a large file split into fragments may have several).
+
+```bash
+0g-storage-client extend \
+  --url <blockchain_rpc_endpoint> \
+  --key <private_key> \
+  --indexer <storage_indexer_endpoint> \
+  --tx <submit_tx_hash>[,<submit_tx_hash>...]
+```
+
+**Parameters:**
+`--tx` is one or more original submit tx hashes (repeatable or comma-separated). Use exactly
+one of `--indexer` or `--node`. Common transaction flags (`--fee`, `--nonce`, `--max-gas-price`,
+`--n-retries`, `--step`), plus `--submitter`, `--expected-replica`, `--method`, `--full-trusted`,
+`--batch-size`, `--timeout`, `--flow-address`, and `--market-address`, are supported.
+
+How it works: the original submission is recovered from each transaction's on-chain `Submit`
+event (no full file or chain scan needed), every fragment is checked to confirm it is still
+stored, and — only if **all** fragments are present — a new `submit` transaction re-pays the
+fee. If any fragment has been pruned, **no transaction is sent** and the command lists the
+roots that must be uploaded again.
+
+:::note No client-readable expiry
+The client cannot read a file's remaining storage period — decide when to extend based on your
+own record of when the data was uploaded.
+:::
 
 ### File Download
 
