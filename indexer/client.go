@@ -151,6 +151,12 @@ func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, d
 
 	dropped := make([]string, 0)
 	attempts := 0
+	// Preserve the landed Flow.submit across SkipTx-recovery: once a
+	// submit lands (non-zero tx), a later recovering iteration uploads
+	// the segments but returns a zero (skipped) tx hash. We must still
+	// surface the real submission so callers can record/bill it instead
+	// of mistaking it for a no-op dedup. See #157.
+	var landedTx, landedRoots []eth_common.Hash
 
 	for {
 		uploader, err := c.NewUploaderFromIndexerNodes(ctx, data.NumSegments(), w3Client, expectedReplica, dropped, opt.Method, opt.FullTrusted)
@@ -159,8 +165,14 @@ func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, d
 		}
 
 		txHashes, roots, err := uploader.SplitableUpload(ctx, data, opt)
+		// Remember the first iteration that actually submitted, so a
+		// later SkipTx-recovery iteration's zero hash can't erase it.
+		if len(landedTx) == 0 && anyNonZero(txHashes) {
+			landedTx, landedRoots = txHashes, roots
+		}
 		if err == nil {
-			return txHashes, roots, nil
+			rtx, rroots := preferLanded(txHashes, roots, landedTx, landedRoots)
+			return rtx, rroots, nil
 		}
 
 		// If Flow.submit already succeeded on a previous attempt
@@ -193,9 +205,34 @@ func (c *Client) SplitableUpload(ctx context.Context, w3Client *web3go.Client, d
 		}
 
 		if attempts >= maxRetry {
-			return txHashes, roots, err
+			rtx, rroots := preferLanded(txHashes, roots, landedTx, landedRoots)
+			return rtx, rroots, err
 		}
 	}
+}
+
+// anyNonZero reports whether hs contains at least one non-zero hash —
+// i.e. an actual on-chain submission (as opposed to a skipped/zero one).
+func anyNonZero(hs []eth_common.Hash) bool {
+	for _, h := range hs {
+		if h != (eth_common.Hash{}) {
+			return true
+		}
+	}
+	return false
+}
+
+// preferLanded returns the landed submission (txHashes+roots captured on
+// an earlier retry iteration) when the current iteration skipped it (all
+// hashes zero). This preserves the real Flow.submit across SkipTx-
+// recovery so callers can record/bill it. When no submit ever landed
+// (genuine pre-existing dedup, zero throughout), the current zero result
+// is returned unchanged. See #157.
+func preferLanded(curTx, curRoots, landedTx, landedRoots []eth_common.Hash) ([]eth_common.Hash, []eth_common.Hash) {
+	if len(landedTx) > 0 && !anyNonZero(curTx) {
+		return landedTx, landedRoots
+	}
+	return curTx, curRoots
 }
 
 // BatchUpload submit multiple data to 0g storage contract batchly in single on-chain transaction, then transfer the data to the storage nodes selected from indexer service.
