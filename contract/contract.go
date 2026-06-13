@@ -132,11 +132,21 @@ func (submission Submission) Root() common.Hash {
 	return root
 }
 
+// onBroadcast, if non-nil, is invoked with the transaction hash the
+// instant each Flow.submit broadcasts — before the receipt wait. It is
+// the single point where the hash first exists, so a caller can journal
+// the spend durably the moment it happens; a crash or caller-abort before
+// this function returns then can't lose the hash. The receipt wait itself
+// is intentionally NOT cancellable by the caller's context (see the ctx
+// note below). Fires per successful Transact; under gas-bump retries it
+// can fire more than once (replacement txs share a nonce, so at most one
+// mines — callers that accumulate hashes must resolve each on chain).
 func TransactWithGasAdjustment(
 	contract *FlowContract,
 	method string,
 	opts *bind.TransactOpts,
 	retryOpts *TxRetryOption,
+	onBroadcast func(common.Hash),
 	params ...any,
 ) (*types.Receipt, error) {
 	// Set timeout and max non-gas retries from retryOpts if provided.
@@ -189,6 +199,13 @@ func TransactWithGasAdjustment(
 	errCh := make(chan error, 1)
 	failCh := make(chan error, 1)
 
+	// The receipt wait runs on a fresh context, deliberately NOT derived
+	// from opts.Context: once the tx is broadcast the operator has paid
+	// and the receipt is imminent, so a caller cancel (e.g. a drain) must
+	// NOT abandon the wait — that would discard the receipt (and its seq
+	// mapping) for a tx that is going to mine anyway. The caller learns the
+	// hash at broadcast via onBroadcast; the long-pole segment upload that
+	// follows is what honors the caller's context. See issue #159.
 	var ctx context.Context
 	var cancel context.CancelFunc
 	if retryOpts.Timeout > 0 {
@@ -221,6 +238,13 @@ func TransactWithGasAdjustment(
 			tx, err := contract.FlowTransactor.contract.Transact(opts, method, params...)
 
 			if err == nil {
+				// The tx is broadcast: surface its hash NOW, the instant it
+				// exists and before the receipt wait. This is the durable
+				// record of the spend — a crash or caller-abort before this
+				// function returns can't lose it. See issue #159.
+				if onBroadcast != nil {
+					onBroadcast(tx.Hash())
+				}
 				// Wait for successful execution in a separate goroutine.
 				// Use local variables to avoid racing with the outer loop's err.
 				go func() {
@@ -300,6 +324,7 @@ func TransactWithGasAdjustmentNoReceipt(
 	method string,
 	opts *bind.TransactOpts,
 	retryOpts *TxRetryOption,
+	onBroadcast func(common.Hash),
 	params ...any,
 ) (*types.Transaction, error) {
 	// Set timeout and max non-gas retries from retryOpts if provided.
@@ -336,6 +361,9 @@ func TransactWithGasAdjustmentNoReceipt(
 
 		tx, err := contract.FlowTransactor.contract.Transact(opts, method, params...)
 		if err == nil {
+			if onBroadcast != nil {
+				onBroadcast(tx.Hash())
+			}
 			return tx, nil
 		}
 

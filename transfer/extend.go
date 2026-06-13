@@ -220,7 +220,7 @@ func (uploader *Uploader) Resubmit(ctx context.Context, items []ExtendItem, opt 
 			params = []any{subs[0]}
 		}
 
-		receipt, err := contract.TransactWithGasAdjustment(uploader.flow, method, opts, retryOpt, params...)
+		receipt, err := contract.TransactWithGasAdjustment(uploader.flow, method, opts, retryOpt, opt.OnSubmitted, params...)
 		if err != nil {
 			return txHashes, errors.WithMessage(err, "Failed to re-submit for extend")
 		}

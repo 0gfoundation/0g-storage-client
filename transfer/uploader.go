@@ -54,6 +54,17 @@ type TransactionOption struct {
 	MaxGasPrice *big.Int       // max gas price for transaction
 	NRetries    int            // number of retries for uploading
 	Step        int64          // step for gas price increase (step/10, e.g. 15 means 1.5x)
+
+	// OnSubmitted, if non-nil, is invoked with the transaction hash the
+	// instant each Flow.submit broadcasts — BEFORE the receipt wait and
+	// segment upload. It fires once per Flow.submit (a multi-batch upload
+	// calls it once per batch), at the single point where the hash first
+	// exists. It lets a caller durably journal "this tx was broadcast" so
+	// a context-cancel or crash between broadcast and the upload's return
+	// can't lose the hash and strand a paid submit. Must be cheap and
+	// non-blocking: it runs inline on the submit path. Additive — nil for
+	// existing callers, no behavior change.
+	OnSubmitted func(common.Hash)
 }
 
 // UploadOption upload option for a file
@@ -639,9 +650,9 @@ func (uploader *Uploader) SubmitLogEntry(ctx context.Context, datas []core.Itera
 	}
 
 	if waitReceipt {
-		receipt, err = contract.TransactWithGasAdjustment(uploader.flow, method, opts, retryOpt, params...)
+		receipt, err = contract.TransactWithGasAdjustment(uploader.flow, method, opts, retryOpt, submitOption.OnSubmitted, params...)
 	} else {
-		tx, err = contract.TransactWithGasAdjustmentNoReceipt(uploader.flow, method, opts, retryOpt, params...)
+		tx, err = contract.TransactWithGasAdjustmentNoReceipt(uploader.flow, method, opts, retryOpt, submitOption.OnSubmitted, params...)
 	}
 
 	if err != nil {
