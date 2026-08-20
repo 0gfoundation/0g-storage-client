@@ -112,7 +112,14 @@ func touchFile(filePath string) error {
 	if err != nil {
 		return errors.WithMessage(err, "failed to create or open file")
 	}
-	defer file.Close()
+
+	// os.Chtimes works on the path, so the descriptor has already served its purpose.
+	// Closing it here rather than deferring keeps the open window short and, unlike a
+	// deferred close, cannot discard the result: this is a write handle, and reporting
+	// success for one the OS refused to close would be a lie about the entry.
+	if err := file.Close(); err != nil {
+		return errors.WithMessage(err, "failed to close file")
+	}
 
 	// Update the file's access and modification times to the current time
 	currentTime := time.Now()
