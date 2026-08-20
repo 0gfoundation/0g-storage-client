@@ -10,6 +10,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/common/rpc"
 	"github.com/0gfoundation/0g-storage-client/common/shard"
+	"github.com/0gfoundation/0g-storage-client/common/util"
 	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer"
@@ -399,12 +400,12 @@ func (c *Client) DownloadFragments(ctx context.Context, roots []string, filename
 	return c.downloadPlainFragments(ctx, roots, filename, withProof)
 }
 
-func (c *Client) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
+func (c *Client) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) (err error) {
 	outFile, err := os.Create(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
 	}
-	defer outFile.Close()
+	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
 	for _, root := range roots {
 		tempFile := fmt.Sprintf("%v.temp", root)
@@ -438,12 +439,12 @@ func (c *Client) downloadPlainFragments(ctx context.Context, roots []string, fil
 // downloadEncryptedFragments downloads fragments raw (without decryption),
 // extracts the encryption header from fragment 0, then decrypts each fragment
 // with proper CTR offset tracking and writes decrypted data to the output file.
-func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
+func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) (err error) {
 	outFile, err := os.Create(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
 	}
-	defer outFile.Close()
+	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
 	var header *core.EncryptionHeader
 	var key [32]byte

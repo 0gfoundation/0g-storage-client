@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
+	"github.com/0gfoundation/0g-storage-client/common/util"
 	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/0gfoundation/0g-storage-client/transfer/download"
@@ -47,6 +48,19 @@ var (
 
 	ErrFileAlreadyExists = errors.New("File already exists")
 )
+
+// createOutputFile creates a download destination, truncating any existing file. It
+// is a variable so tests can inject the Close failures described on
+// util.CloseOutputFile, which a real local filesystem will not produce on demand.
+var createOutputFile = func(name string) (io.WriteCloser, error) {
+	file, err := os.Create(name)
+	if err != nil {
+		// Return an untyped nil rather than a non-nil interface holding a nil *os.File.
+		return nil, err
+	}
+
+	return file, nil
+}
 
 type IDownloader interface {
 	Download(ctx context.Context, root, filename string, withProof bool) error
@@ -108,12 +122,12 @@ func (downloader *Downloader) DownloadFragments(ctx context.Context, roots []str
 	return downloader.downloadPlainFragments(ctx, roots, filename, withProof)
 }
 
-func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	outFile, err := os.Create(filename)
+func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) (err error) {
+	outFile, err := createOutputFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
 	}
-	defer outFile.Close()
+	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
 	for _, root := range roots {
 		tempFile := fmt.Sprintf("%v.temp", root)
@@ -143,12 +157,12 @@ func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots 
 // downloadEncryptedFragments downloads fragments raw (without decryption),
 // extracts the encryption header from fragment 0, then decrypts each fragment
 // with proper CTR offset tracking and writes decrypted data to the output file.
-func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	outFile, err := os.Create(filename)
+func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) (err error) {
+	outFile, err := createOutputFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
 	}
-	defer outFile.Close()
+	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
 	var header *core.EncryptionHeader
 	var key [32]byte
