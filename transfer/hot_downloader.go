@@ -9,6 +9,7 @@ import (
 	"os"
 
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
+	"github.com/0gfoundation/0g-storage-client/common/util"
 	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/node"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -60,15 +61,20 @@ func (d *HotDownloader) hasDecryptionKey() bool {
 
 // Download downloads a single file, trying hot storage first and falling back to regular download.
 func (d *HotDownloader) Download(ctx context.Context, root, filename string, withProof bool) error {
-	outFile, err := os.Create(filename)
+	outFile, err := createOutputFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
 	}
 
 	ok, hotErr := d.tryHotDownload(ctx, root, outFile)
-	outFile.Close()
+	closeErr := outFile.Close()
 
 	if !ok {
+		// The partial file is discarded either way here, so a close failure only needs
+		// recording: the fallback download rewrites the file from scratch.
+		if closeErr != nil {
+			d.logger.WithError(closeErr).Debug("Failed to close partial hot storage output file")
+		}
 		os.Remove(filename)
 		if hotErr != nil {
 			d.logger.WithError(hotErr).Warn("Hot storage download failed, falling back to regular download")
@@ -76,6 +82,14 @@ func (d *HotDownloader) Download(ctx context.Context, root, filename string, wit
 			d.logger.Info("File not in hot storage, falling back to regular download")
 		}
 		return d.fallback.Download(ctx, root, filename, withProof)
+	}
+
+	// See util.CloseOutputFile: the download is not complete until it closes cleanly.
+	// This has to be settled before the file is read back for decryption below, so a
+	// truncated download is not reported as a decryption failure.
+	if closeErr != nil {
+		os.Remove(filename)
+		return errors.WithMessage(closeErr, "failed to close output file")
 	}
 
 	if d.hasDecryptionKey() {
@@ -96,12 +110,12 @@ func (d *HotDownloader) DownloadFragments(ctx context.Context, roots []string, f
 	return d.downloadPlainFragments(ctx, roots, filename, withProof)
 }
 
-func (d *HotDownloader) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	outFile, err := os.Create(filename)
+func (d *HotDownloader) downloadPlainFragments(ctx context.Context, roots []string, filename string, withProof bool) (err error) {
+	outFile, err := createOutputFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
 	}
-	defer outFile.Close()
+	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
 	for i, root := range roots {
 		tempFile := fmt.Sprintf("%v.temp", root)
@@ -133,12 +147,12 @@ func (d *HotDownloader) downloadPlainFragments(ctx context.Context, roots []stri
 	return nil
 }
 
-func (d *HotDownloader) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) error {
-	outFile, err := os.Create(filename)
+func (d *HotDownloader) downloadEncryptedFragments(ctx context.Context, roots []string, filename string, withProof bool) (err error) {
+	outFile, err := createOutputFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
 	}
-	defer outFile.Close()
+	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
 	var header *core.EncryptionHeader
 	var key [32]byte
@@ -238,13 +252,17 @@ func (d *HotDownloader) tryHotDownload(ctx context.Context, root string, w io.Wr
 // tryHotDownloadToFile streams hot storage data into a new file at path.
 // Returns (true, nil) on success, (false, nil/err) on miss/error — partial file is removed on failure.
 func (d *HotDownloader) tryHotDownloadToFile(ctx context.Context, root, path string) (bool, error) {
-	f, err := os.Create(path)
+	f, err := createOutputFile(path)
 	if err != nil {
 		return false, fmt.Errorf("failed to create temp file: %w", err)
 	}
 
 	ok, err := d.tryHotDownload(ctx, root, f)
-	f.Close()
+	if closeErr := f.Close(); ok && closeErr != nil {
+		// This temp file is read straight back into the concatenated output, so a close
+		// failure - which can mean a short file - must not pass as a hot storage hit.
+		ok, err = false, fmt.Errorf("failed to close temp file: %w", closeErr)
+	}
 	if !ok {
 		os.Remove(path)
 	}
