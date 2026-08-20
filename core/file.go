@@ -52,11 +52,21 @@ func Exists(name string) (bool, error) {
 }
 
 // Open create a File from a file on disk
-func Open(name string) (*File, error) {
+func Open(name string) (_ *File, err error) {
 	file, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
+
+	// The descriptor is only handed over to the returned *File on success, so close it
+	// on every validation failure below. Callers that reject many user-supplied paths
+	// without ever holding a *File - the local gateway opens one per HTTP request -
+	// would otherwise leak a descriptor per failure until the process hits its limit.
+	defer func() {
+		if err != nil {
+			file.Close()
+		}
+	}()
 
 	info, err := file.Stat()
 	if err != nil {
