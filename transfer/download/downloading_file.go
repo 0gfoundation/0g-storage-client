@@ -15,11 +15,21 @@ type DownloadingFile struct {
 	metadata   *Metadata
 }
 
-func CreateDownloadingFile(filename string, root common.Hash, size int64) (*DownloadingFile, error) {
+func CreateDownloadingFile(filename string, root common.Hash, size int64) (_ *DownloadingFile, err error) {
 	file, err := os.OpenFile(filename+downloadingFileSuffix, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return nil, errors.WithMessage(err, "Failed to open file")
 	}
+
+	// The descriptor is only handed over to the returned DownloadingFile on success, so
+	// close it on every validation failure below. Root and size mismatches are ordinary
+	// occurrences - they happen whenever a download is resumed against a stale
+	// .download file - so leaking there accumulates descriptors across retries.
+	defer func() {
+		if err != nil {
+			file.Close()
+		}
+	}()
 
 	info, err := file.Stat()
 	if err != nil {
