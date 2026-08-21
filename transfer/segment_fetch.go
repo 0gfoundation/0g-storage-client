@@ -42,10 +42,10 @@ type segmentFetchRequest struct {
 //
 //   - (data, nil)  — segment fetched (and proof validated, if requested)
 //   - (nil,  nil)  — this node does not shard the requested segment, OR
-//                    the RPC returned a nil segment (treat as "not here";
-//                    caller should try the next node)
+//     the RPC returned a nil segment (treat as "not here";
+//     caller should try the next node)
 //   - (nil,  err)  — RPC error, proof-validation error, or missing
-//                    ShardConfig on the client
+//     ShardConfig on the client
 //
 // Used by both download_parallel.go (file-based parallel download) and
 // downloader_writer.go (io.Writer-based streaming download) so the

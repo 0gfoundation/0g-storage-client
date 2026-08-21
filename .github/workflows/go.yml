@@ -19,10 +19,38 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.22.5'
+        # Read the version from go.mod so it cannot drift from what the module
+        # declares. gofmt output can differ between Go releases, so the Format
+        # step below is only reproducible if CI and go.mod agree.
+        go-version-file: go.mod
+
+    # gofmt and go mod tidy findings are invisible to the compiler, so build and
+    # test alone cannot catch them. These two steps run first: they are fast and
+    # give the clearest failure message.
+    - name: Format
+      run: |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "Not gofmt-formatted:"
+          echo "$unformatted"
+          echo
+          echo "Fix with: gofmt -w ."
+          exit 1
+        fi
+
+    - name: Tidy
+      run: |
+        if ! go mod tidy -diff; then
+          echo
+          echo "go.mod/go.sum are not tidy. Fix with: go mod tidy"
+          exit 1
+        fi
 
     - name: Build
       run: go build ./...
+
+    - name: Vet
+      run: go vet ./...
 
     - name: Test
       run: go test ./...
