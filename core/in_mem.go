@@ -26,16 +26,31 @@ func NewDataInMemory(data []byte) (*DataInMemory, error) {
 }
 
 func (data *DataInMemory) Read(buf []byte, offset int64) (int, error) {
-	n := copy(buf, data.underlying[data.offset+offset:])
-	return n, nil
+	// Reads must not cross the logical view: a fragment from Split shares the
+	// underlying buffer with its siblings, so reading past its size would return the
+	// next fragment's bytes. core.ReadAt hands us a zero-filled buffer and treats
+	// whatever we leave untouched as padding, so overrunning here silently replaces
+	// that padding with real data - changing both the merkle root and the uploaded
+	// bytes. The offset guard also keeps an out-of-range offset from panicking.
+	if offset < 0 || offset >= data.size {
+		return 0, nil
+	}
+	if remaining := data.size - offset; int64(len(buf)) > remaining {
+		buf = buf[:remaining]
+	}
+
+	return copy(buf, data.underlying[data.offset+offset:]), nil
 }
 
+// NumChunks and NumSegments describe this view, not the buffer it was split from,
+// matching File. Upload planning derives segment work from them, so a fragment
+// reporting its parent's counts would request offsets beyond its own padded size.
 func (data *DataInMemory) NumChunks() uint64 {
-	return NumSplits(int64(len(data.underlying)), DefaultChunkSize)
+	return NumSplits(data.size, DefaultChunkSize)
 }
 
 func (data *DataInMemory) NumSegments() uint64 {
-	return NumSplits(int64(len(data.underlying)), DefaultSegmentSize)
+	return NumSplits(data.size, DefaultSegmentSize)
 }
 
 func (data *DataInMemory) Size() int64 {

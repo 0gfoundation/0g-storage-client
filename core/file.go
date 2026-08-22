@@ -28,6 +28,19 @@ type File struct {
 var _ IterableData = (*File)(nil)
 
 func (file *File) Read(buf []byte, offset int64) (int, error) {
+	// Reads must not cross the logical view: a fragment from Split shares the
+	// descriptor with its siblings, so reading past its size would return the next
+	// fragment's bytes. core.ReadAt hands us a zero-filled buffer and treats whatever
+	// we leave untouched as padding, so overrunning here silently replaces that
+	// padding with real data - changing both the merkle root and the uploaded bytes.
+	// EncryptedDataFragment.Read applies the same rule.
+	if offset < 0 || offset >= file.size {
+		return 0, nil
+	}
+	if remaining := file.size - offset; int64(len(buf)) > remaining {
+		buf = buf[:remaining]
+	}
+
 	n, err := file.underlying.ReadAt(buf, file.offset+offset)
 	// unexpected IO error
 	if err != nil && !errors.Is(err, io.EOF) {
