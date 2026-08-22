@@ -563,3 +563,55 @@ func TestHotDownloader_DownloadFragments_EncryptedOutputCloseFailureIsReported(t
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errSimulatedClose)
 }
+
+// On a cache miss this layer still owns decryption: the CLI deliberately leaves the
+// fallback downloader without keys when --hot-router is set (cmd/download.go guards
+// every WithEncryptionKey/WithWalletPrivateKey call on hotRouter == ""), so if
+// Download returns straight from the fallback the caller is handed ciphertext and
+// told it succeeded.
+func TestHotDownloader_Download_CacheMissDecryptsFallbackData(t *testing.T) {
+	router := newTestRouter(t, "") // empty = 404 cache miss
+	defer router.Close()
+
+	encryptionKey := testEncryptionKey()
+	var key [32]byte
+	copy(key[:], encryptionKey)
+
+	plaintext := []byte("secret payload served by the fallback")
+	ciphertext := encryptedV1Fragment(t, key, plaintext)
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(_ context.Context, _, filename string, _ bool) error {
+			return os.WriteFile(filename, ciphertext, 0644)
+		}},
+	).WithEncryptionKey(encryptionKey)
+
+	output := filepath.Join(t.TempDir(), "output.dat")
+	require.NoError(t, downloader.Download(context.Background(), "0xabcd", output, false))
+
+	data, err := os.ReadFile(output)
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, data, "fallback data must be decrypted, not left as ciphertext")
+}
+
+// A fallback failure must still surface rather than being masked by the new
+// decryption step that follows it.
+func TestHotDownloader_Download_CacheMissFallbackErrorWins(t *testing.T) {
+	router := newTestRouter(t, "")
+	defer router.Close()
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(context.Context, string, string, bool) error {
+			return errors.New("fallback exploded")
+		}},
+	).WithEncryptionKey(testEncryptionKey())
+
+	err := downloader.Download(context.Background(), "0xabcd", filepath.Join(t.TempDir(), "output.dat"), false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fallback exploded")
+}

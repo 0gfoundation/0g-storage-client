@@ -33,6 +33,11 @@ type HotDownloader struct {
 }
 
 // NewHotDownloader creates a new HotDownloader.
+//
+// When decryption keys are set on the returned HotDownloader, it owns decryption for
+// every path it serves - hot cache hit, fallback, and fragments alike - so fallback
+// must NOT itself be configured with decryption keys, or its output would be
+// decrypted twice.
 func NewHotDownloader(routerClient *node.HotRouterClient, privateKey *ecdsa.PrivateKey, fallback IDownloader, opts ...zg_common.LogOption) *HotDownloader {
 	return &HotDownloader{
 		routerClient: routerClient,
@@ -81,7 +86,22 @@ func (d *HotDownloader) Download(ctx context.Context, root, filename string, wit
 		} else {
 			d.logger.Info("File not in hot storage, falling back to regular download")
 		}
-		return d.fallback.Download(ctx, root, filename, withProof)
+		if err := d.fallback.Download(ctx, root, filename, withProof); err != nil {
+			return err
+		}
+
+		// This layer owns decryption on both paths - the fallback is deliberately
+		// constructed without keys (see NewHotDownloader). Returning straight from the
+		// fallback would leave ciphertext in the caller's output file and report success,
+		// while a cache hit for the same file decrypted correctly.
+		if d.hasDecryptionKey() {
+			if err := d.decryptFile(filename); err != nil {
+				return errors.WithMessage(err, "failed to decrypt fallback data")
+			}
+		}
+
+		d.logger.Info("Completed download via fallback")
+		return nil
 	}
 
 	// See util.CloseOutputFile: the download is not complete until it closes cleanly.
