@@ -165,12 +165,30 @@ func (uploader *Uploader) UploadDir(ctx context.Context, folder string, option .
 		return txnHash, rootHash, errors.WithMessage(err, "failed to upload directory metadata")
 	}
 
+	// Directory metadata is assumed to fit in one fragment, and normally does by a wide
+	// margin: encoded entries cost ~136 bytes each, so the 4 GiB default FragmentSize
+	// would need roughly 31 million files in a single directory, and MarshalBinary
+	// refuses anything over MaxUint32 before that. The assumption is not enforced,
+	// though - FragmentSize is caller-supplied, and metadata splits at roughly 7,700
+	// files per MiB of it.
+	//
+	// Only metaRoots[0] can be returned here, and BuildFileTree rebuilds the tree by
+	// fetching that one root with the single-file Download, so a split blob is
+	// unrecoverable. Fail loudly rather than return a root that cannot rebuild the
+	// directory, which would otherwise surface much later as a decode error on someone
+	// else's download. The check is != 1 so a zero-root result is caught too, instead
+	// of silently returning the zero hash as success.
+	if len(metaRoots) != 1 {
+		return txnHash, rootHash, errors.Errorf(
+			"directory metadata split into %d fragments: only the first root can be returned, "+
+				"so the directory could not be rebuilt from it - increase FragmentSize",
+			len(metaRoots))
+	}
+
 	if len(txHashes) > 0 {
 		txnHash = txHashes[0]
 	}
-	if len(metaRoots) > 0 {
-		rootHash = metaRoots[0]
-	}
+	rootHash = metaRoots[0]
 
 	return txnHash, rootHash, nil
 }
