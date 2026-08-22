@@ -63,7 +63,12 @@ func (proof *Proof) ValidateHash(root, contentHash common.Hash, position, numLea
 	}
 
 	// root mismatch
-	if len(proof.Lemma) > 1 && root != proof.Lemma[len(proof.Lemma)-1] {
+	//
+	// validateFormat guarantees a non-empty lemma, so the last element is always the
+	// proven root. It must be compared unconditionally: for a single-leaf proof the
+	// lemma holds one hash that is both leaf and root, so validateRoot below reduces to
+	// comparing it with itself and would accept any root the caller passed in.
+	if root != proof.Lemma[len(proof.Lemma)-1] {
 		return errProofRootMismatch
 	}
 
