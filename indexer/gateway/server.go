@@ -17,7 +17,10 @@ type Config struct {
 func MustServeWithRPC(nodeManager *indexer.NodeManager, locationCache *indexer.FileLocationCache, config Config) {
 	controller := NewRestController(nodeManager, locationCache, config.MaxDownloadFileSize)
 
-	api.Serve(config.Endpoint, func(router *gin.Engine) {
+	// MustServe rather than Serve: the error from Serve was discarded here, so a gateway
+	// that could not bind its endpoint returned from MustServeWithRPC as though it were
+	// listening, and cmd/indexer.go - for which this is the final statement - exited 0.
+	api.MustServe(config.Endpoint, func(router *gin.Engine) {
 		router.GET("/file", api.Wrap(controller.downloadFile))
 		router.GET("/file/:cid/*filePath", api.Wrap(controller.downloadFileInFolder))
 		router.GET("/file/info/:cid", api.Wrap(controller.getFileStatus))
