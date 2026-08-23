@@ -12,6 +12,7 @@ import (
 	"github.com/0gfoundation/0g-storage-client/common/util"
 	"github.com/0gfoundation/0g-storage-client/core"
 	"github.com/0gfoundation/0g-storage-client/node"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -66,6 +67,15 @@ func (d *HotDownloader) hasDecryptionKey() bool {
 
 // Download downloads a single file, trying hot storage first and falling back to regular download.
 func (d *HotDownloader) Download(ctx context.Context, root, filename string, withProof bool) error {
+	// Apply the destination contract before touching anything, exactly as the regular
+	// path does: an existing file is never overwritten, whether it already matches
+	// (ErrFileAlreadyExists, which download_dir treats as success) or holds something
+	// else (a hard error). Creating the destination up front meant the hot path
+	// overwrote a matching file and destroyed a differing one.
+	if err := checkFileExistence(filename, common.HexToHash(root)); err != nil {
+		return errors.WithMessage(err, "failed to check file existence")
+	}
+
 	outFile, err := createOutputFile(filename)
 	if err != nil {
 		return errors.WithMessage(err, "failed to create output file")
@@ -76,7 +86,7 @@ func (d *HotDownloader) Download(ctx context.Context, root, filename string, wit
 
 	if !ok {
 		// The partial file is discarded either way here, so a close failure only needs
-		// recording: the fallback download rewrites the file from scratch.
+		// recording: the fallback writes the destination itself.
 		if closeErr != nil {
 			d.logger.WithError(closeErr).Debug("Failed to close partial hot storage output file")
 		}
@@ -86,6 +96,9 @@ func (d *HotDownloader) Download(ctx context.Context, root, filename string, wit
 		} else {
 			d.logger.Info("File not in hot storage, falling back to regular download")
 		}
+		// The partial file has been removed, so the fallback sees no destination and applies
+		// its own existence check from a clean slate. A failure here costs the caller
+		// nothing, because checkFileExistence above established there was no file to lose.
 		if err := d.fallback.Download(ctx, root, filename, withProof); err != nil {
 			return err
 		}
@@ -114,6 +127,11 @@ func (d *HotDownloader) Download(ctx context.Context, root, filename string, wit
 
 	if d.hasDecryptionKey() {
 		if err := d.decryptFile(filename); err != nil {
+			// Remove the file rather than leaving ciphertext behind. Uploads compute the
+			// root over the encrypted stream, so undecrypted bytes still match the
+			// requested root - checkFileExistence would report ErrFileAlreadyExists on the
+			// next run and the caller would be told they already had the file.
+			os.Remove(filename)
 			return errors.WithMessage(err, "failed to decrypt hot storage data")
 		}
 	}
