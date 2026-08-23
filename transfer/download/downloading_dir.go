@@ -16,23 +16,25 @@ type DownloadingDir struct {
 // CreateDownloadingDir creates a temporary downloading directory by renaming the existing directory if it exists
 // or by creating a new one if it doesn't. It ensures files are stored in a safe temporary directory.
 func CreateDownloadingDir(filename string) (*DownloadingDir, error) {
+	// Refuse to touch an existing directory, matching the single-file contract where
+	// checkFileExistence never overwrites a destination. This used to rename the caller's
+	// directory aside to stage into, which meant any mid-download failure left it
+	// existing only under the staging name - from the caller's point of view it had
+	// vanished, and recovering it meant knowing that name and renaming by hand.
+	if _, err := os.Stat(filename); err == nil {
+		return nil, errors.Errorf("directory already exists: %v", filename)
+	} else if !os.IsNotExist(err) {
+		return nil, errors.WithMessage(err, "failed to check whether the directory exists")
+	}
+
+	// Reuse a staging directory left by an earlier attempt rather than starting over:
+	// Add skips entries whose content already matches, so a retry resumes.
 	tmpDir := filename + downloadingFileSuffix
-
-	// Attempt to rename the existing directory to the temporary downloading directory.
-	err := os.Rename(filename, tmpDir)
-	if err == nil {
-		return &DownloadingDir{filename}, nil
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return nil, errors.WithMessage(err, "failed to create temporary directory")
 	}
 
-	// If the directory doesn't exist, create the temporary directory.
-	if os.IsNotExist(err) {
-		if err := os.MkdirAll(tmpDir, 0755); err != nil {
-			return nil, errors.WithMessage(err, "failed to create temporary directory")
-		}
-		return &DownloadingDir{filename}, nil
-	}
-
-	return nil, errors.WithMessage(err, "failed to rename existing directory")
+	return &DownloadingDir{filename: filename}, nil
 }
 
 // Add adds a file, directory, or symbolic link to the downloading directory.

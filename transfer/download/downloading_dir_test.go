@@ -86,3 +86,70 @@ func TestDownloadingDir_Add_CreatesEmptyFileEntry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), info.Size())
 }
+
+// An existing directory is never touched, matching the single-file contract where
+// checkFileExistence refuses rather than overwrites. Staging used to rename it aside,
+// so a mid-download failure left it existing only under the staging name.
+func TestCreateDownloadingDir_RefusesExistingDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "tree")
+	require.NoError(t, os.Mkdir(root, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "keep.dat"), []byte("pre-existing"), 0644))
+
+	directory, err := CreateDownloadingDir(root)
+
+	require.Error(t, err)
+	assert.Nil(t, directory)
+	assert.Contains(t, err.Error(), "already exists")
+
+	// Untouched: still at its own path, contents intact, nothing staged.
+	data, readErr := os.ReadFile(filepath.Join(root, "keep.dat"))
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("pre-existing"), data)
+	assert.NoDirExists(t, root+downloadingFileSuffix)
+}
+
+func TestCreateDownloadingDir_CreatesStagingForFreshPath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "tree")
+
+	directory, err := CreateDownloadingDir(root)
+
+	require.NoError(t, err)
+	require.NotNil(t, directory)
+	assert.DirExists(t, root+downloadingFileSuffix)
+	assert.NoDirExists(t, root, "the destination appears only on Seal")
+}
+
+// A previous attempt's staging directory is reused so a retry resumes rather than
+// re-fetching everything: Add skips entries whose content already matches.
+func TestCreateDownloadingDir_ReusesStagingFromEarlierAttempt(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "tree")
+
+	first, err := CreateDownloadingDir(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	partial := filepath.Join(root+downloadingFileSuffix, "partial.dat")
+	require.NoError(t, os.WriteFile(partial, []byte("already fetched"), 0644))
+
+	// Retry: the destination still does not exist, so this must proceed and keep the work.
+	second, err := CreateDownloadingDir(root)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+
+	data, err := os.ReadFile(partial)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("already fetched"), data, "partial work must survive a retry")
+}
+
+func TestDownloadingDir_SealInstallsStaging(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "tree")
+
+	directory, err := CreateDownloadingDir(root)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root+downloadingFileSuffix, "new.dat"), []byte("new"), 0644))
+
+	require.NoError(t, directory.Seal())
+
+	assert.DirExists(t, root)
+	assert.NoDirExists(t, root+downloadingFileSuffix)
+	assert.FileExists(t, filepath.Join(root, "new.dat"))
+}
