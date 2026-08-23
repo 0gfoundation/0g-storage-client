@@ -69,8 +69,22 @@ func SegmentRoot(chunks []byte, emptyChunksPadded ...uint64) common.Hash {
 	var builder merkle.TreeBuilder
 
 	// append chunks
+	//
+	// The trailing chunk may be partial: indexer/gateway/upload.go forwards the raw Data
+	// field of an upload request into PaddedSegmentRoot and on to here, and nothing on
+	// that path checks its length, so slicing a fixed DefaultChunkSize unconditionally
+	// let one malformed request panic the gateway process. A partial chunk is hashed as
+	// if zero-padded to a full chunk, matching how whole chunks are padded below. The
+	// resulting root then simply fails the caller's proof check, which is the right
+	// answer for malformed input.
 	for offset, dataLen := 0, len(chunks); offset < dataLen; offset += DefaultChunkSize {
-		chunk := chunks[offset : offset+DefaultChunkSize]
+		if end := offset + DefaultChunkSize; end <= dataLen {
+			builder.Append(chunks[offset:end])
+			continue
+		}
+
+		chunk := make([]byte, DefaultChunkSize)
+		copy(chunk, chunks[offset:])
 		builder.Append(chunk)
 	}
 
