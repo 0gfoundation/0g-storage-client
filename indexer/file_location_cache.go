@@ -107,7 +107,10 @@ func (c *FileLocationCache) getFileLocation(ctx context.Context, txSeq uint64, c
 		})
 		selected[v.URL()] = struct{}{}
 	}
-	if len(nodes) == 0 && segNum == 0 {
+	// Only give up here when there is nothing else to ask. Trusted nodes not knowing the
+	// transaction yet is exactly the case the discovery node is configured for, and
+	// returning early skipped it entirely.
+	if len(nodes) == 0 && segNum == 0 && c.discoverNode == nil {
 		return nil, fmt.Errorf("file info not found")
 	}
 	logrus.Debugf("find file #%v from trusted nodes, got %v nodes holding the file", txSeq, len(nodes))
@@ -186,7 +189,13 @@ func (c *FileLocationCache) getFileLocation(ctx context.Context, txSeq uint64, c
 			}
 		}
 		logrus.Debugf("triggering FindFile for tx seq %v", txSeq)
-		c.discoverNode.FindFile(ctx, txSeq)
+		if _, err := c.discoverNode.FindFile(ctx, txSeq); err != nil {
+			// Record the cooldown only for a request that was actually accepted. Storing it
+			// regardless meant one transient RPC failure suppressed every further attempt
+			// for defaultFindFileCooldown, so a momentary blip stopped discovery for an hour.
+			logrus.WithError(err).Warnf("failed to trigger FindFile for tx seq %v", txSeq)
+			return nil, nil
+		}
 		c.latestFindFile.Store(txSeq, time.Now())
 	}
 	return nil, nil
