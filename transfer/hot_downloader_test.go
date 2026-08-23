@@ -615,3 +615,140 @@ func TestHotDownloader_Download_CacheMissFallbackErrorWins(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fallback exploded")
 }
+
+// The regular downloader never overwrites an existing destination: checkFileExistence
+// returns ErrFileAlreadyExists when the content already matches, and a hard error when
+// it does not. The hot path bypassed that entirely - it created the destination before
+// looking - so it overwrote a matching file and destroyed a differing one.
+
+func TestHotDownloader_Download_ExistingMatchingFileIsSkipped(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "output.dat")
+	content := []byte("already downloaded, byte for byte")
+	require.NoError(t, os.WriteFile(output, content, 0644))
+
+	// Ask for exactly the root this file already has.
+	root, err := core.MerkleRoot(output)
+	require.NoError(t, err)
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(mustNotBeContacted(t, "hot router").URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(context.Context, string, string, bool) error {
+			t.Error("fallback must not run when the destination already matches")
+			return nil
+		}},
+	)
+
+	err = downloader.Download(context.Background(), root.Hex(), output, false)
+
+	assert.ErrorIs(t, err, ErrFileAlreadyExists)
+	data, readErr := os.ReadFile(output)
+	require.NoError(t, readErr)
+	assert.Equal(t, content, data, "a matching destination must be left exactly as it was")
+}
+
+func TestHotDownloader_Download_ExistingDifferentFileAborts(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "output.dat")
+	content := []byte("some other file the caller still wants")
+	require.NoError(t, os.WriteFile(output, content, 0644))
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(mustNotBeContacted(t, "hot router").URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(context.Context, string, string, bool) error {
+			t.Error("fallback must not run when the destination holds a different file")
+			return nil
+		}},
+	)
+
+	err := downloader.Download(context.Background(), "0xabcd", output, false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "different hash")
+	data, readErr := os.ReadFile(output)
+	require.NoError(t, readErr)
+	assert.Equal(t, content, data, "a differing destination must not be destroyed")
+}
+
+// A failed download must not leave a partial file behind, or the next run would find
+// it via checkFileExistence and refuse with "File already exists with different hash".
+func TestHotDownloader_Download_FailedDownloadLeavesNoPartialDestination(t *testing.T) {
+	router := newTestRouter(t, "") // 404 = cache miss
+	defer router.Close()
+
+	output := filepath.Join(t.TempDir(), "output.dat")
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(context.Context, string, string, bool) error {
+			return errors.New("storage nodes unreachable")
+		}},
+	)
+
+	require.Error(t, downloader.Download(context.Background(), "0xabcd", output, false))
+	assert.NoFileExists(t, output, "a failed download must not leave a partial destination")
+}
+
+func TestHotDownloader_Download_CacheHitCreatesDestination(t *testing.T) {
+	fresh := []byte("freshly fetched from hot storage")
+	hotNode := newTestHotNode(t, fresh)
+	defer hotNode.Close()
+	router := newTestRouter(t, hotNode.URL)
+	defer router.Close()
+
+	output := filepath.Join(t.TempDir(), "output.dat")
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{},
+	)
+
+	require.NoError(t, downloader.Download(context.Background(), "0xabcd", output, false))
+
+	data, err := os.ReadFile(output)
+	require.NoError(t, err)
+	assert.Equal(t, fresh, data)
+}
+
+// A failed decryption must not leave the ciphertext at the destination. Uploads compute
+// the root over the encrypted stream, so those bytes still match the requested root -
+// checkFileExistence would report ErrFileAlreadyExists on the next run and the caller
+// would be told they already had the file, while holding an encrypted one.
+func TestHotDownloader_Download_FailedDecryptionLeavesNoCiphertext(t *testing.T) {
+	var wrongKey [32]byte
+	for i := range wrongKey {
+		wrongKey[i] = 0xAA
+	}
+	// Encrypted with a key the downloader will not be given, so ResolveDecryptionKey
+	// succeeds but the header parse/decrypt path rejects it.
+	hotNode := newTestHotNode(t, []byte("this is not a valid encryption header at all"))
+	defer hotNode.Close()
+	router := newTestRouter(t, hotNode.URL)
+	defer router.Close()
+
+	output := filepath.Join(t.TempDir(), "output.dat")
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{},
+	).WithEncryptionKey(testEncryptionKey())
+
+	require.Error(t, downloader.Download(context.Background(), "0xabcd", output, false))
+	assert.NoFileExists(t, output,
+		"ciphertext left at the destination would be mistaken for a completed download")
+}
+
+// mustNotBeContacted returns a server that fails the test if any request reaches it.
+func mustNotBeContacted(t *testing.T, what string) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("%s must not be contacted", what)
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}

@@ -218,7 +218,7 @@ func (downloader *Downloader) downloadAndValidate(ctx context.Context, root, fil
 		return errors.WithMessage(err, "Failed to query file info")
 	}
 
-	if err = downloader.checkExistence(filename, hash); err != nil {
+	if err = checkFileExistence(filename, hash); err != nil {
 		return errors.WithMessage(err, "Failed to check file existence")
 	}
 
@@ -267,7 +267,11 @@ func (downloader *Downloader) queryFile(ctx context.Context, root common.Hash) (
 	return
 }
 
-func (downloader *Downloader) checkExistence(filename string, hash common.Hash) error {
+// checkFileExistence implements the destination contract shared by every download
+// path: an existing file is never overwritten. It is package level rather than a
+// method because HotDownloader has to apply the same rule, and a second copy of this
+// logic would be free to drift from it.
+func checkFileExistence(filename string, hash common.Hash) error {
 	file, err := core.Open(filename)
 	if os.IsNotExist(err) {
 		return nil
