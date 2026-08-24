@@ -59,3 +59,27 @@ func TestCloseOutputFile(t *testing.T) {
 		assert.FileExists(t, path, "pre-existing error paths keep their partial output")
 	})
 }
+
+func TestTempDirBeside(t *testing.T) {
+	destDir := t.TempDir()
+	destination := filepath.Join(destDir, "output.dat")
+
+	first, err := TempDirBeside(destination, ".zgs-fragments-*")
+	require.NoError(t, err)
+	second, err := TempDirBeside(destination, ".zgs-fragments-*")
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first, second, "each call must get its own directory")
+	assert.Equal(t, destDir, filepath.Dir(first), "must sit beside the destination, not in the process cwd")
+	assert.Equal(t, destDir, filepath.Dir(second))
+	assert.DirExists(t, first)
+	assert.DirExists(t, second)
+
+	require.NoError(t, os.RemoveAll(first))
+	require.NoError(t, os.RemoveAll(second))
+}
+
+func TestTempDirBeside_ReportsUnusableParent(t *testing.T) {
+	_, err := TempDirBeside(filepath.Join(t.TempDir(), "no-such-dir", "output.dat"), "x-*")
+	assert.Error(t, err, "a missing parent directory must be reported")
+}

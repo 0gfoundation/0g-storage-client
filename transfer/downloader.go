@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
@@ -129,8 +130,14 @@ func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots 
 	}
 	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
+	tempDir, err := util.TempDirBeside(filename, ".zgs-fragments-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
 	for _, root := range roots {
-		tempFile := fmt.Sprintf("%v.temp", root)
+		tempFile := filepath.Join(tempDir, root+".temp")
 		err := downloader.Download(ctx, root, tempFile, withProof)
 		if err != nil {
 			return errors.WithMessage(err, "Failed to download file")
@@ -145,10 +152,9 @@ func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots 
 			return errors.WithMessage(err, fmt.Sprintf("failed to copy content from temp file %s", tempFile))
 		}
 
-		err = os.Remove(tempFile)
-		if err != nil {
-			return errors.WithMessage(err, fmt.Sprintf("failed to delete temp file %s:", tempFile))
-		}
+		// Best effort: tempDir is removed by the deferred RemoveAll regardless, so a failed
+		// unlink here is not worth failing an otherwise complete download over.
+		os.Remove(tempFile)
 	}
 
 	return nil
@@ -164,12 +170,18 @@ func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, ro
 	}
 	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
+	tempDir, err := util.TempDirBeside(filename, ".zgs-fragments-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
 	var header *core.EncryptionHeader
 	var key [32]byte
 	var cumulativeDataOffset uint64
 
 	for i, root := range roots {
-		tempFile := fmt.Sprintf("%v.temp", root)
+		tempFile := filepath.Join(tempDir, root+".temp")
 
 		// Download raw (without decryption)
 		if err := downloader.downloadAndValidate(ctx, root, tempFile, withProof); err != nil {

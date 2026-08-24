@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/0gfoundation/0g-storage-client/core"
@@ -751,4 +753,65 @@ func mustNotBeContacted(t *testing.T, what string) *httptest.Server {
 	t.Cleanup(server.Close)
 
 	return server
+}
+
+// Fragment temp files used to be named "<root>.temp" relative to the process working
+// directory, so two downloads sharing a root used the same path: one could remove it
+// while the other was still reading, and both wrote to it concurrently. Each call now
+// gets its own directory beside its own destination.
+func TestHotDownloader_DownloadFragments_TempPathsArePerCall(t *testing.T) {
+	hotNode := newTestHotNode(t, []byte("fragment payload"))
+	defer hotNode.Close()
+	router := newTestRouter(t, hotNode.URL)
+	defer router.Close()
+
+	// Record every path the download paths create.
+	var mu sync.Mutex
+	var created []string
+	original := createOutputFile
+	createOutputFile = func(name string) (io.WriteCloser, error) {
+		mu.Lock()
+		created = append(created, name)
+		mu.Unlock()
+		return original(name)
+	}
+	t.Cleanup(func() { createOutputFile = original })
+
+	roots := []string{"0x1111", "0x2222"}
+	dir := t.TempDir()
+
+	// Two concurrent downloads of the same roots, to different destinations.
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			downloader := NewHotDownloader(
+				node.NewHotRouterClient(router.URL, testChainID),
+				testKey(t),
+				&mockFallbackDownloader{},
+			)
+			output := filepath.Join(dir, fmt.Sprintf("output-%d.dat", i))
+			assert.NoError(t, downloader.DownloadFragments(context.Background(), roots, output, false))
+		}(i)
+	}
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	var temps []string
+	for _, name := range created {
+		if isTempFragment(name) {
+			temps = append(temps, name)
+		}
+	}
+	require.Len(t, temps, 2*len(roots), "one temp file per fragment per download")
+
+	unique := make(map[string]struct{}, len(temps))
+	for _, name := range temps {
+		unique[name] = struct{}{}
+		assert.NotEqual(t, filepath.Base(name), name, "temp files must not be bare cwd-relative names")
+	}
+	assert.Len(t, unique, len(temps), "concurrent downloads must not share a temp path: %v", temps)
 }

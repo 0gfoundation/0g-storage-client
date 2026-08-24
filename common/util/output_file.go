@@ -3,6 +3,7 @@ package util
 import (
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/pkg/errors"
 )
@@ -32,4 +33,21 @@ func CloseOutputFile(file io.Closer, filename string, prevErr error) error {
 	os.Remove(filename)
 
 	return errors.WithMessage(closeErr, "failed to close output file")
+}
+
+// TempDirBeside creates a temporary directory alongside filename, so intermediate work
+// for that destination shares the destination's filesystem rather than landing wherever
+// the process happens to be running or in a system temp directory that may be much
+// smaller. The caller is responsible for removing it, normally with a deferred
+// os.RemoveAll.
+//
+// pattern is interpreted as by os.MkdirTemp: a trailing "*" is replaced by a random
+// string, otherwise one is appended.
+func TempDirBeside(filename, pattern string) (string, error) {
+	dir, err := os.MkdirTemp(filepath.Dir(filename), pattern)
+	if err != nil {
+		return "", errors.WithMessagef(err, "failed to create temp directory beside %v", filename)
+	}
+
+	return dir, nil
 }

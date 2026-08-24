@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	zg_common "github.com/0gfoundation/0g-storage-client/common"
 	"github.com/0gfoundation/0g-storage-client/common/util"
@@ -155,8 +156,14 @@ func (d *HotDownloader) downloadPlainFragments(ctx context.Context, roots []stri
 	}
 	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
+	tempDir, err := util.TempDirBeside(filename, ".zgs-fragments-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
 	for i, root := range roots {
-		tempFile := fmt.Sprintf("%v.temp", root)
+		tempFile := filepath.Join(tempDir, root+".temp")
 
 		ok, hotErr := d.tryHotDownloadToFile(ctx, root, tempFile)
 		if !ok {
@@ -192,12 +199,18 @@ func (d *HotDownloader) downloadEncryptedFragments(ctx context.Context, roots []
 	}
 	defer func() { err = util.CloseOutputFile(outFile, filename, err) }()
 
+	tempDir, err := util.TempDirBeside(filename, ".zgs-fragments-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
 	var header *core.EncryptionHeader
 	var key [32]byte
 	var cumulativeDataOffset uint64
 
 	for i, root := range roots {
-		fragmentData, err := d.downloadFragmentData(ctx, root, i, withProof)
+		fragmentData, err := d.downloadFragmentData(ctx, root, i, withProof, tempDir)
 		if err != nil {
 			return err
 		}
@@ -230,7 +243,7 @@ func (d *HotDownloader) downloadEncryptedFragments(ctx context.Context, roots []
 
 // downloadFragmentData gets the raw bytes for a single fragment, trying hot storage first.
 // Used only by the encrypted fragments path where bytes are needed for decryption.
-func (d *HotDownloader) downloadFragmentData(ctx context.Context, root string, index int, withProof bool) ([]byte, error) {
+func (d *HotDownloader) downloadFragmentData(ctx context.Context, root string, index int, withProof bool, tempDir string) ([]byte, error) {
 	var buf bytes.Buffer
 	ok, err := d.tryHotDownload(ctx, root, &buf)
 	if !ok {
@@ -239,7 +252,7 @@ func (d *HotDownloader) downloadFragmentData(ctx context.Context, root string, i
 		} else {
 			d.logger.WithField("fragment", index).Info("Fragment not in hot storage, falling back")
 		}
-		tempFile := fmt.Sprintf("%v.temp", root)
+		tempFile := filepath.Join(tempDir, root+".temp")
 		if err := d.fallback.Download(ctx, root, tempFile, withProof); err != nil {
 			return nil, errors.WithMessage(err, fmt.Sprintf("failed to download fragment %d", index))
 		}
