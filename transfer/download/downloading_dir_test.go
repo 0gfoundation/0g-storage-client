@@ -39,20 +39,6 @@ func TestTouchFile_RefreshesModTime(t *testing.T) {
 		"mod time %v was not refreshed (still near the stale %v)", info.ModTime(), stale)
 }
 
-// Characterizes today's behavior: touchFile opens without O_TRUNC, so an entry left
-// over from an earlier run into the same .download directory keeps its content. If
-// that is ever changed, it should be a deliberate decision rather than a surprise.
-func TestTouchFile_LeavesExistingContentIntact(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "existing.dat")
-	require.NoError(t, os.WriteFile(path, []byte("previously downloaded"), 0644))
-
-	require.NoError(t, touchFile(path))
-
-	data, err := os.ReadFile(path)
-	require.NoError(t, err)
-	assert.Equal(t, []byte("previously downloaded"), data)
-}
-
 func TestTouchFile_ReturnsErrorWhenParentMissing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "no-such-dir", "file.dat")
 
@@ -85,4 +71,50 @@ func TestDownloadingDir_Add_CreatesEmptyFileEntry(t *testing.T) {
 	info, err := os.Stat(filepath.Join(root+downloadingFileSuffix, "empty.dat"))
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), info.Size())
+}
+
+// touchFile is reached only for entries the manifest declares empty. An existing file
+// with content used to be left exactly as it was, so the downloaded tree silently
+// disagreed with the manifest that produced it — while a non-empty entry whose local
+// copy differs has always failed the download outright with "File already exists with
+// different hash". This makes the two consistent, without truncating data the caller
+// may still want.
+func TestTouchFile_RefusesExistingFileWithContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "was-not-empty.dat")
+	content := []byte("content the manifest says should not be here")
+	require.NoError(t, os.WriteFile(path, content, 0644))
+
+	err := touchFile(path)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove it and retry", "the message must say what to do")
+	assert.NotContains(t, err.Error(), path,
+		"Add supplies the path, so touchFile must not repeat it")
+
+	data, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	assert.Equal(t, content, data, "the file must not be truncated — that would destroy data")
+}
+
+// An existing empty file is exactly what the entry asks for, so it is accepted.
+func TestTouchFile_AcceptsExistingEmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "already-empty.dat")
+	require.NoError(t, os.WriteFile(path, nil, 0644))
+
+	assert.NoError(t, touchFile(path))
+}
+
+// Add surfaces the refusal rather than reporting the entry as materialized.
+func TestDownloadingDir_Add_RefusesNonEmptyFileForEmptyEntry(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "tree")
+	directory, err := CreateDownloadingDir(root)
+	require.NoError(t, err)
+
+	staged := filepath.Join(root+downloadingFileSuffix, "keep.dat")
+	require.NoError(t, os.WriteFile(staged, []byte("pre-existing content"), 0644))
+
+	err = directory.Add(&dir.FsNode{Name: "keep.dat", Type: dir.FileTypeFile}, "keep.dat", nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove it and retry")
 }
