@@ -414,6 +414,11 @@ func (c *Client) downloadPlainFragments(ctx context.Context, roots []string, fil
 			return err
 		}
 		err = downloader.Download(ctx, root, tempFile, withProof)
+		if errors.Is(err, transfer.ErrFileAlreadyExists) {
+			// A complete fragment file from an earlier attempt blocks this one. Say so and
+			// name it: the caller never created it and has no way to guess it is the obstacle.
+			return transfer.FragmentLeftBehindError(err)
+		}
 		if err != nil {
 			return errors.WithMessage(err, "Failed to download file")
 		}
@@ -460,6 +465,9 @@ func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string,
 		}
 		err = downloader.Download(ctx, root, tempFile, withProof)
 		if err != nil {
+			if errors.Is(err, transfer.ErrFileAlreadyExists) {
+				return transfer.FragmentLeftBehindError(err)
+			}
 			return errors.WithMessage(err, fmt.Sprintf("Failed to download fragment %d", i))
 		}
 
