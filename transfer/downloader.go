@@ -288,7 +288,7 @@ func checkFileExistence(filename string, hash common.Hash) error {
 		return errors.WithMessage(err, "Failed to create file merkle tree")
 	}
 
-	if tree.Root().Hex() == hash.Hex() {
+	if tree.Root() == hash {
 		return ErrFileAlreadyExists
 	}
 
@@ -338,8 +338,13 @@ func (downloader *Downloader) validateDownloadFile(root, filename string, fileSi
 		return errors.WithMessage(err, "Failed to create merkle tree")
 	}
 
-	if rootHex := tree.Root().Hex(); rootHex != root {
-		return errors.Errorf("Merkle root mismatch, downloaded = %v", rootHex)
+	// Compare hashes, not strings. The caller's root is whatever text they passed in, and
+	// common.HexToHash accepts forms that Hash.Hex never produces - uppercase digits, a
+	// missing 0x prefix, fewer than 64 digits - so every other step here normalised it
+	// while this one rejected it. The download would complete and then be discarded for
+	// its spelling.
+	if expected := common.HexToHash(root); tree.Root() != expected {
+		return errors.Errorf("Merkle root mismatch, expected = %v, downloaded = %v", expected.Hex(), tree.Root().Hex())
 	}
 
 	downloader.logger.Info("Succeeded to validate the downloaded file")
