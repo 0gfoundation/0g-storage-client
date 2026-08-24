@@ -5,9 +5,12 @@ import (
 	"time"
 
 	"github.com/0gfoundation/0g-storage-client/common/util"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	gethTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/mcuadros/go-defaults"
+	rpcprovider "github.com/openweb3/go-rpc-provider"
 	providers "github.com/openweb3/go-rpc-provider/provider_wrapper"
 	"github.com/openweb3/web3go"
 	"github.com/openweb3/web3go/interfaces"
@@ -103,14 +106,91 @@ func WaitForReceipt(ctx context.Context, client *web3go.Client, txHash common.Ha
 			return receipt, nil
 		}
 
-		if receipt.TxExecErrorMsg == nil {
-			return nil, errors.New("Transaction execution failed")
+		if receipt.TxExecErrorMsg != nil {
+			return nil, errors.Errorf("Transaction execution failed, %v", *receipt.TxExecErrorMsg)
 		}
 
-		return nil, errors.Errorf("Transaction execution failed, %v", *receipt.TxExecErrorMsg)
+		if reason := revertReason(ctx, client, txHash, receipt.BlockNumber); reason != "" {
+			return nil, errors.Errorf("Transaction execution failed, %v", reason)
+		}
+
+		return nil, errors.New("Transaction execution failed")
 	default:
 		return nil, errors.Errorf("Unknown receipt status %v", *receipt.Status)
 	}
+}
+
+// revertReason recovers why the EVM rejected a transaction by replaying it with
+// eth_call. A geth-compatible receipt carries no such field - web3go populates
+// TxExecErrorMsg only for Conflux - so without the replay a failed transaction
+// reports nothing beyond the fact that it failed.
+//
+// Diagnosis only, and best-effort: the replay runs against the parent block, so
+// it can disagree with the original execution when an earlier transaction in the
+// same block set up the state, and it recovers nothing from a node that has
+// pruned that state. An empty string means the caller should report the bare
+// failure rather than a guess.
+func revertReason(ctx context.Context, client *web3go.Client, txHash common.Hash, blockNumber uint64) string {
+	if blockNumber == 0 {
+		return ""
+	}
+
+	eth := client.WithContext(ctx).Eth
+
+	tx, err := eth.TransactionByHash(txHash)
+	if err != nil || tx == nil {
+		return ""
+	}
+
+	// The state at the receipt's own block already includes this transaction, so
+	// replaying there would not reproduce the revert.
+	parent := types.BlockNumberOrHashWithNumber(types.NewBlockNumber(int64(blockNumber - 1)))
+
+	// Gas price is deliberately omitted: a call needs none, and forwarding both
+	// the legacy and the dynamic-fee fields is rejected outright by geth, which
+	// would mask the revert we came here to read.
+	if _, err := eth.Call(types.CallRequest{
+		From:  &tx.From,
+		To:    tx.To,
+		Gas:   &tx.Gas,
+		Value: tx.Value,
+		Data:  tx.Input,
+	}, &parent); err != nil {
+		return revertReasonFromError(err)
+	}
+
+	// The replay succeeded where the transaction failed, so the parent state is
+	// not what it actually ran against and we have learned nothing.
+	return ""
+}
+
+// revertReasonFromError extracts the reason a node returned alongside a failed
+// eth_call. Nodes report it as ABI-encoded revert data on the JSON-RPC error;
+// whatever cannot be decoded falls back to the node's own message, which is
+// still more than the caller had.
+func revertReasonFromError(err error) string {
+	var jsonErr *rpcprovider.JsonError
+	if !errors.As(err, &jsonErr) {
+		return err.Error()
+	}
+
+	data, ok := jsonErr.Data.(string)
+	if !ok {
+		return jsonErr.Error()
+	}
+
+	revertData, decodeErr := hexutil.Decode(data)
+	if decodeErr != nil {
+		return jsonErr.Error()
+	}
+
+	// UnpackRevert covers both Error(string) and Panic(uint256).
+	reason, unpackErr := abi.UnpackRevert(revertData)
+	if unpackErr != nil {
+		return jsonErr.Error()
+	}
+
+	return reason
 }
 
 func defaultSigner(clientWithSigner *web3go.Client) (interfaces.Signer, error) {
