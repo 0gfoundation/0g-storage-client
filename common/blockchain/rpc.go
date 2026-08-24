@@ -125,26 +125,27 @@ func WaitForReceipt(ctx context.Context, client *web3go.Client, txHash common.Ha
 // TxExecErrorMsg only for Conflux - so without the replay a failed transaction
 // reports nothing beyond the fact that it failed.
 //
-// Diagnosis only, and best-effort: the replay runs against the parent block, so
-// it can disagree with the original execution when an earlier transaction in the
-// same block set up the state, and it recovers nothing from a node that has
-// pruned that state. An empty string means the caller should report the bare
-// failure rather than a guess.
+// Diagnosis only, and best-effort: a node that has pruned the block's state
+// recovers nothing, and a revert that depends on the position of the
+// transaction within its block will not reproduce. An empty string means the
+// caller should report the bare failure rather than a guess.
 func revertReason(ctx context.Context, client *web3go.Client, txHash common.Hash, blockNumber uint64) string {
-	if blockNumber == 0 {
-		return ""
-	}
-
 	eth := client.WithContext(ctx).Eth
 
 	tx, err := eth.TransactionByHash(txHash)
 	if err != nil || tx == nil {
+		logrus.WithError(err).WithField("txHash", txHash).
+			Debug("Cannot diagnose the revert: transaction not retrievable")
 		return ""
 	}
 
-	// The state at the receipt's own block already includes this transaction, so
-	// replaying there would not reproduce the revert.
-	parent := types.BlockNumberOrHashWithNumber(types.NewBlockNumber(int64(blockNumber - 1)))
+	// Replay in the block that contains the transaction, not in its parent. A
+	// revert is atomic, so the block's state holds none of this transaction's
+	// effects and is what it actually ran against - while the block context,
+	// number and timestamp included, matches only here. Replaying in the parent
+	// would silently answer a different question, which is what a condition
+	// tied to block height would turn into a false negative.
+	block := types.BlockNumberOrHashWithNumber(types.NewBlockNumber(int64(blockNumber)))
 
 	// Gas price is deliberately omitted: a call needs none, and forwarding both
 	// the legacy and the dynamic-fee fields is rejected outright by geth, which
@@ -155,12 +156,15 @@ func revertReason(ctx context.Context, client *web3go.Client, txHash common.Hash
 		Gas:   &tx.Gas,
 		Value: tx.Value,
 		Data:  tx.Input,
-	}, &parent); err != nil {
+	}, &block); err != nil {
 		return revertReasonFromError(err)
 	}
 
-	// The replay succeeded where the transaction failed, so the parent state is
-	// not what it actually ran against and we have learned nothing.
+	// Reporting nothing is the honest outcome, but it is also the one that
+	// leaves no trace, so say why the caller is about to see a bare failure.
+	logrus.WithFields(logrus.Fields{"txHash": txHash, "blockNumber": blockNumber}).
+		Debug("Cannot diagnose the revert: the replay succeeded where the transaction failed")
+
 	return ""
 }
 

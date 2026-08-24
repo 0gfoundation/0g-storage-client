@@ -184,9 +184,9 @@ func TestRevertReason(t *testing.T) {
 		assert.Equal(t, "Flow: invalid submission", reason)
 	})
 
-	t.Run("replays against the parent block", func(t *testing.T) {
-		// Replaying at the receipt's own block would run against state that
-		// already includes this transaction, so the revert would not reproduce.
+	t.Run("replays in the block that contains the transaction", func(t *testing.T) {
+		// A revert is atomic, so that block's state holds none of the
+		// transaction's effects while its context still matches.
 		var blockParam string
 		client := stubNode(t, true, func() (string, *rpcprovider.JsonError) {
 			return "0x", nil
@@ -196,7 +196,7 @@ func TestRevertReason(t *testing.T) {
 		})
 
 		revertReason(context.Background(), client, common.Hash{}, blockNumber)
-		assert.Equal(t, "0x6f", blockParam, "block %d must be replayed at %d", blockNumber, blockNumber-1)
+		assert.Equal(t, "0x70", blockParam, "block %d must be replayed in block %d", blockNumber, blockNumber)
 	})
 
 	t.Run("reports nothing when the replay succeeds", func(t *testing.T) {
@@ -218,13 +218,4 @@ func TestRevertReason(t *testing.T) {
 		assert.Empty(t, revertReason(context.Background(), client, common.Hash{}, blockNumber))
 	})
 
-	t.Run("makes no request at all for the genesis block", func(t *testing.T) {
-		// Guards the underflow in blockNumber-1 as much as the pointless call.
-		client := stubNode(t, true, func() (string, *rpcprovider.JsonError) {
-			assert.Fail(t, "no replay is possible below the genesis block")
-			return "0x", nil
-		})
-
-		assert.Empty(t, revertReason(context.Background(), client, common.Hash{}, 0))
-	})
 }
