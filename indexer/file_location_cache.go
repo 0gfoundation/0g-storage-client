@@ -35,6 +35,7 @@ type FileLocationCache struct {
 	latestFindFile    sync.Map // tx seq -> time.Time
 	latestFailedCall  sync.Map // url -> time.Time
 	latestSuccessCall sync.Map // url -> successCall
+	zgsClients        sync.Map // url -> *node.ZgsClient, kept for the process lifetime
 	discoverNode      *node.AdminClient
 	discoveryPorts    []int
 }
@@ -56,6 +57,40 @@ func (c *FileLocationCache) Close() {
 	if c.discoverNode != nil {
 		c.discoverNode.Close()
 	}
+
+	c.zgsClients.Range(func(_, value any) bool {
+		value.(*node.ZgsClient).Close()
+		return true
+	})
+}
+
+// zgsClient returns a client for url, creating it once and reusing it thereafter.
+//
+// Discovery probes a client per candidate URL on every lookup that reaches it, and each
+// client carries its own HTTP transport whose connections its Close does not release -
+// so constructing one per probe grew the process's descriptor count with traffic. Keying
+// them by URL makes that cost proportional to the number of distinct nodes seen instead,
+// which the network bounds.
+//
+// They are deliberately not evicted: an evicted client's connections would not be
+// reclaimed either, so eviction would restore the unbounded growth rather than cap it.
+func (c *FileLocationCache) zgsClient(url string) (*node.ZgsClient, error) {
+	if cached, ok := c.zgsClients.Load(url); ok {
+		return cached.(*node.ZgsClient), nil
+	}
+
+	client, err := node.NewZgsClient(url, nil, defaultZgsClientOpt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Another goroutine may have won the race; keep whichever is stored and discard ours.
+	if actual, loaded := c.zgsClients.LoadOrStore(url, client); loaded {
+		client.Close()
+		return actual.(*node.ZgsClient), nil
+	}
+
+	return client, nil
 }
 
 func (c *FileLocationCache) GetFileLocations(ctx context.Context, txSeq uint64) ([]*shard.ShardedNode, error) {
@@ -143,11 +178,10 @@ func (c *FileLocationCache) getFileLocation(ctx context.Context, txSeq uint64, c
 						continue
 					}
 				}
-				zgsClient, err := node.NewZgsClient(url, nil, defaultZgsClientOpt)
+				zgsClient, err := c.zgsClient(url)
 				if err != nil {
 					continue
 				}
-				defer zgsClient.Close()
 				fileInfo, err := zgsClient.GetFileInfoByTxSeq(ctx, txSeq)
 				if err != nil {
 					c.latestFailedCall.Store(url, time.Now())
