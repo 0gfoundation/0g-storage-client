@@ -106,7 +106,24 @@ func createOrUpdateSymlink(target, linkName string) error {
 }
 
 // touchFile creates or updates the access and modification time of a file.
+//
+// It is reached only for entries the manifest declares empty, so an existing file with
+// content is refused rather than left in place or truncated. Leaving it made the
+// downloaded tree silently disagree with the manifest; truncating it would destroy data
+// the caller may still want. Refusing matches what a non-empty entry already does, where
+// checkFileExistence reports "File already exists with different hash" and fails the
+// download rather than resolving the conflict on the caller's behalf.
 func touchFile(filePath string) error {
+	if info, err := os.Stat(filePath); err == nil {
+		if info.Size() > 0 {
+			// Add names the path, so this must not repeat it.
+			return errors.New(
+				"it already has content, but the version being downloaded is empty; remove it and retry")
+		}
+	} else if !os.IsNotExist(err) {
+		return errors.WithMessage(err, "failed to stat file")
+	}
+
 	// Open the file, create it if it doesn't exist
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
