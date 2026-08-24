@@ -2,6 +2,9 @@ package blockchain
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/0gfoundation/0g-storage-client/common/util"
@@ -120,6 +123,61 @@ func WaitForReceipt(ctx context.Context, client *web3go.Client, txHash common.Ha
 	}
 }
 
+// customErrors maps a 4-byte selector to the error it identifies, so a revert
+// can be named rather than shown as raw bytes.
+var customErrors sync.Map
+
+// RegisterCustomErrors makes a contract's custom errors readable in revert
+// diagnostics. Solidity encodes a custom error as a selector over ABI-encoded
+// arguments, and abi.UnpackRevert resolves only the two builtins, Error(string)
+// and Panic(uint256) - so without the contract's own ABI a revert such as
+// NotEnoughFee() arrives as four opaque bytes and says nothing.
+//
+// Contract packages call this from init(). This package cannot reach them
+// itself, since they import it.
+func RegisterCustomErrors(contractABI *abi.ABI) {
+	for _, abiError := range contractABI.Errors {
+		customErrors.Store([4]byte(abiError.ID[:4]), abiError)
+	}
+}
+
+// namedCustomError resolves revert data against the registered ABIs. It returns
+// "" for a selector nobody registered, leaving the caller to report the raw
+// data rather than a name it cannot stand behind.
+func namedCustomError(data []byte) string {
+	if len(data) < 4 {
+		return ""
+	}
+
+	entry, ok := customErrors.Load([4]byte(data[:4]))
+	if !ok {
+		return ""
+	}
+
+	abiError, ok := entry.(abi.Error)
+	if !ok {
+		return ""
+	}
+
+	if len(abiError.Inputs) == 0 {
+		return abiError.Sig
+	}
+
+	// The arguments carry the detail - which limit, whose address - so losing
+	// them to a malformed payload still leaves the name worth reporting.
+	args, err := abiError.Inputs.Unpack(data[4:])
+	if err != nil {
+		return abiError.Sig
+	}
+
+	formatted := make([]string, len(args))
+	for i, arg := range args {
+		formatted[i] = fmt.Sprintf("%v", arg)
+	}
+
+	return fmt.Sprintf("%s(%s)", abiError.Name, strings.Join(formatted, ", "))
+}
+
 // revertReason recovers why the EVM rejected a transaction by replaying it with
 // eth_call. A geth-compatible receipt carries no such field - web3go populates
 // TxExecErrorMsg only for Conflux - so without the replay a failed transaction
@@ -189,12 +247,16 @@ func revertReasonFromError(err error) string {
 	}
 
 	// UnpackRevert covers both Error(string) and Panic(uint256).
-	reason, unpackErr := abi.UnpackRevert(revertData)
-	if unpackErr != nil {
-		return jsonErr.Error()
+	if reason, unpackErr := abi.UnpackRevert(revertData); unpackErr == nil {
+		return reason
 	}
 
-	return reason
+	// Everything else is a custom error, which only the contract's ABI names.
+	if reason := namedCustomError(revertData); reason != "" {
+		return reason
+	}
+
+	return jsonErr.Error()
 }
 
 func defaultSigner(clientWithSigner *web3go.Client) (interfaces.Signer, error) {
