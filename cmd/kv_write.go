@@ -59,19 +59,19 @@ var (
 
 func init() {
 	kvWriteCmd.Flags().StringVar(&kvWriteArgs.streamId, "stream-id", "0x", "stream to read/write")
-	kvWriteCmd.MarkFlagRequired("stream-id")
+	mustMarkFlagRequired(kvWriteCmd, "stream-id")
 
 	kvWriteCmd.Flags().StringSliceVar(&kvWriteArgs.keys, "stream-keys", []string{}, "kv keys")
-	kvWriteCmd.MarkFlagRequired("stream-keys")
+	mustMarkFlagRequired(kvWriteCmd, "stream-keys")
 	kvWriteCmd.Flags().StringSliceVar(&kvWriteArgs.values, "stream-values", []string{}, "kv values")
-	kvWriteCmd.MarkFlagRequired("stream-values")
+	mustMarkFlagRequired(kvWriteCmd, "stream-values")
 
 	kvWriteCmd.Flags().Uint64Var(&kvWriteArgs.version, "version", math.MaxUint64, "key version")
 
 	kvWriteCmd.Flags().StringVar(&kvWriteArgs.url, "url", "", "Fullnode URL to interact with ZeroGStorage smart contract")
-	kvWriteCmd.MarkFlagRequired("url")
+	mustMarkFlagRequired(kvWriteCmd, "url")
 	kvWriteCmd.Flags().StringVar(&kvWriteArgs.key, "key", "", "Private key to interact with smart contract")
-	kvWriteCmd.MarkFlagRequired("key")
+	mustMarkFlagRequired(kvWriteCmd, "key")
 
 	kvWriteCmd.Flags().StringSliceVar(&kvWriteArgs.node, "node", []string{}, "ZeroGStorage storage node URL")
 	kvWriteCmd.Flags().StringVar(&kvWriteArgs.indexer, "indexer", "", "ZeroGStorage indexer URL")

@@ -34,15 +34,15 @@ var (
 
 func init() {
 	kvReadCmd.Flags().StringVar(&kvReadArgs.streamId, "stream-id", "0x", "stream to read/write")
-	kvReadCmd.MarkFlagRequired("stream-id")
+	mustMarkFlagRequired(kvReadCmd, "stream-id")
 
 	kvReadCmd.Flags().StringSliceVar(&kvReadArgs.keys, "stream-keys", []string{}, "kv keys")
-	kvReadCmd.MarkFlagRequired("kv-keys")
+	mustMarkFlagRequired(kvReadCmd, "stream-keys")
 
 	kvReadCmd.Flags().Uint64Var(&kvReadArgs.version, "version", math.MaxUint64, "key version")
 
 	kvReadCmd.Flags().StringVar(&kvReadArgs.node, "node", "", "kv node url")
-	kvReadCmd.MarkFlagRequired("node")
+	mustMarkFlagRequired(kvReadCmd, "node")
 
 	kvReadCmd.Flags().DurationVar(&kvReadArgs.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
 

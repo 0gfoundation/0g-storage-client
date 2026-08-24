@@ -26,11 +26,11 @@ var (
 
 func init() {
 	deployCmd.Flags().StringVar(&deployArgs.url, "url", "", "Fullnode URL to interact with blockchain")
-	deployCmd.MarkFlagRequired("url")
+	mustMarkFlagRequired(deployCmd, "url")
 	deployCmd.Flags().StringVar(&deployArgs.key, "key", "", "Private key to create smart contract")
-	deployCmd.MarkFlagRequired("key")
+	mustMarkFlagRequired(deployCmd, "key")
 	deployCmd.Flags().StringVar(&deployArgs.bytecodeOrFile, "bytecode", "", "ZeroGStorage smart contract bytecode")
-	deployCmd.MarkFlagRequired("bytecode")
+	mustMarkFlagRequired(deployCmd, "bytecode")
 
 	deployCmd.Flags().DurationVar(&deployArgs.timeout, "timeout", 0, "cli task timeout, 0 for no timeout")
 

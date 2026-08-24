@@ -41,7 +41,7 @@ type extendArgument struct {
 
 func bindExtendFlags(cmd *cobra.Command, args *extendArgument) {
 	cmd.Flags().StringSliceVar(&args.txs, "tx", []string{}, "Original Flow.submit tx hash(es) returned by upload (repeatable or comma-separated)")
-	cmd.MarkFlagRequired("tx")
+	mustMarkFlagRequired(cmd, "tx")
 
 	cmd.Flags().StringSliceVar(&args.node, "node", []string{}, "ZeroGStorage storage node URL")
 	cmd.Flags().StringVar(&args.indexer, "indexer", "", "ZeroGStorage indexer URL")
