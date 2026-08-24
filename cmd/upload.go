@@ -31,9 +31,9 @@ type transactionArgument struct {
 
 func bindTransactionFlags(cmd *cobra.Command, args *transactionArgument) {
 	cmd.Flags().StringVar(&args.url, "url", "", "Fullnode URL to interact with ZeroGStorage smart contract")
-	cmd.MarkFlagRequired("url")
+	mustMarkFlagRequired(cmd, "url")
 	cmd.Flags().StringVar(&args.key, "key", "", "Private key to interact with smart contract")
-	cmd.MarkFlagRequired("key")
+	mustMarkFlagRequired(cmd, "key")
 
 	cmd.Flags().Float64Var(&args.fee, "fee", 0, "fee paid in a0gi")
 	cmd.Flags().UintVar(&args.nonce, "nonce", 0, "nonce of upload transaction")
@@ -76,7 +76,7 @@ type uploadArgument struct {
 
 func bindUploadFlags(cmd *cobra.Command, args *uploadArgument) {
 	cmd.Flags().StringVar(&args.file, "file", "", "File name to upload")
-	cmd.MarkFlagRequired("file")
+	mustMarkFlagRequired(cmd, "file")
 	cmd.Flags().StringVar(&args.tags, "tags", "0x", "Tags of the file")
 	cmd.Flags().StringVar(&args.submitter, "submitter", "", "Address to submit transaction from (optional, defaults to key owner)")
 

@@ -28,14 +28,18 @@ var (
 func init() {
 	bindUploadFlags(uploadDirCmd, &uploadDirArgs)
 	uploadDirCmd.Flags().StringVar(&uploadDirArgs.url, "url", "", "Fullnode URL to interact with ZeroGStorage smart contract")
-	uploadDirCmd.MarkFlagRequired("url")
+	mustMarkFlagRequired(uploadDirCmd, "url")
 	uploadDirCmd.Flags().StringVar(&uploadDirArgs.key, "key", "", "Private key to interact with smart contract")
-	uploadDirCmd.MarkFlagRequired("key")
+	mustMarkFlagRequired(uploadDirCmd, "key")
 
 	rootCmd.AddCommand(uploadDirCmd)
 }
 
 func uploadDir(*cobra.Command, []string) {
+	if err := validateUploadDirArgs(&uploadDirArgs); err != nil {
+		logrus.WithError(err).Fatal("Invalid arguments")
+	}
+
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if uploadDirArgs.timeout > 0 {

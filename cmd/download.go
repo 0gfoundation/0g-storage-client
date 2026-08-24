@@ -41,7 +41,7 @@ type downloadArgument struct {
 
 func bindDownloadFlags(cmd *cobra.Command, args *downloadArgument) {
 	cmd.Flags().StringVar(&args.file, "file", "", "File name to download")
-	cmd.MarkFlagRequired("file")
+	mustMarkFlagRequired(cmd, "file")
 
 	cmd.Flags().StringSliceVar(&args.nodes, "node", []string{}, "ZeroGStorage storage node URL. Multiple nodes could be specified and separated by comma, e.g. url1,url2,url3")
 	cmd.Flags().StringVar(&args.indexer, "indexer", "", "ZeroGStorage indexer URL")
