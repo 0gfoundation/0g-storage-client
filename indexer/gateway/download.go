@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,14 +134,34 @@ func (ctrl *RestController) downloadAndServeFile(c *gin.Context, cid Cid, filena
 		return ErrFileNotFinalized
 	}
 
+	// Enforce the size limit here rather than at the call sites: this helper serves both
+	// the direct /file route and the in-folder route, and only the latter checked it, so
+	// a direct request for an oversized file bypassed the limit entirely.
+	if err := ctrl.checkDownloadSize(fileInfo.Tx.Size); err != nil {
+		return err
+	}
+
 	downloader, err := transfer.NewDownloader(clients)
 	if err != nil {
 		return errors.WithMessage(err, "Failed to create downloader")
 	}
 
 	root := fileInfo.Tx.DataMerkleRoot.Hex()
-	tmpfile := filepath.Join(os.TempDir(), fmt.Sprintf("zgs_indexer_download_%v", root))
-	defer os.Remove(tmpfile)
+
+	// A per-request directory, not a shared name derived from the root. Two concurrent
+	// requests for the same root previously shared one path: whichever finished first
+	// removed it while the other was still serving, and a request arriving mid-download
+	// opened the same .download staging file as the one in flight.
+	//
+	// Only the directory is created - Download requires the destination itself not to
+	// exist, since checkFileExistence rejects a file it cannot match against the root.
+	tmpDir, err := os.MkdirTemp("", "zgs_indexer_download_*")
+	if err != nil {
+		return errors.WithMessage(err, "Failed to create temporary directory")
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tmpfile := filepath.Join(tmpDir, root)
 
 	if err := downloader.Download(c, root, tmpfile, true); err != nil {
 		return errors.WithMessage(err, "Failed to download file")
@@ -155,6 +174,23 @@ func (ctrl *RestController) downloadAndServeFile(c *gin.Context, cid Cid, filena
 	c.FileAttachment(tmpfile, filename)
 
 	return api.ErrHandled
+}
+
+// checkDownloadSize rejects a download larger than the configured maximum. The size
+// checked is the transaction size, which is what actually gets transferred.
+//
+// Note a maximum of 0 rejects every non-empty file rather than meaning "unlimited";
+// that is the existing behaviour of the in-folder route's own check, kept here so the
+// two routes agree.
+func (ctrl *RestController) checkDownloadSize(size uint64) error {
+	if size > ctrl.maxDownloadFileSize {
+		return ErrFileSizeTooLarge.WithData(map[string]uint64{
+			"actual": size,
+			"max":    ctrl.maxDownloadFileSize,
+		})
+	}
+
+	return nil
 }
 
 // serveDirectoryListing serves the list of files in a directory.
