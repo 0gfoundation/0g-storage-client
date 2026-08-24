@@ -752,3 +752,30 @@ func mustNotBeContacted(t *testing.T, what string) *httptest.Server {
 
 	return server
 }
+
+// A complete fragment file from an earlier attempt blocks the next one. The caller
+// never created it and cannot guess it is the obstacle, so the failure has to name it
+// and say what to do about it.
+func TestHotDownloader_DownloadFragments_LeftoverFragmentTellsUserToRemoveIt(t *testing.T) {
+	chdirTemp(t)
+
+	router := newTestRouter(t, "") // 404 = cache miss, so the fallback is consulted
+	defer router.Close()
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(_ context.Context, _, filename string, _ bool) error {
+			// Wrapped as checkFileExistence reports it once the file is named.
+			return errors.WithMessagef(ErrFileAlreadyExists, "%v", filename)
+		}},
+	)
+
+	err := downloader.DownloadFragments(context.Background(), []string{"0x1111"}, "output.dat", false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "0x1111.temp", "the message must name the leftover fragment file")
+	assert.Contains(t, err.Error(), "remove it and retry", "the message must say what to do")
+	assert.Equal(t, 1, strings.Count(err.Error(), "0x1111.temp"),
+		"the path comes from checkFileExistence, so the hint must not repeat it")
+}

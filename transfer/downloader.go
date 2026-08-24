@@ -62,6 +62,21 @@ var createOutputFile = func(name string) (io.WriteCloser, error) {
 	return file, nil
 }
 
+// FragmentLeftBehindError reports that a fragment temp file from an earlier attempt is
+// blocking this download, and says what to do about it.
+//
+// The advice is specific to fragment temp files. checkFileExistence reports the same
+// ErrFileAlreadyExists for the caller's own destination, where "remove it" would be bad
+// advice - they may well want to keep the file they already have. It is exported because
+// indexer.Client runs the same fragment loops.
+//
+// err is wrapped rather than replaced, so it keeps carrying both ErrFileAlreadyExists
+// for errors.Is and the path that checkFileExistence added; the message deliberately
+// does not repeat that path.
+func FragmentLeftBehindError(err error) error {
+	return errors.WithMessage(err, "a previous attempt left this fragment file behind; remove it and retry")
+}
+
 type IDownloader interface {
 	Download(ctx context.Context, root, filename string, withProof bool) error
 	DownloadFragments(ctx context.Context, roots []string, filename string, withProof bool) error
@@ -132,6 +147,11 @@ func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots 
 	for _, root := range roots {
 		tempFile := fmt.Sprintf("%v.temp", root)
 		err := downloader.Download(ctx, root, tempFile, withProof)
+		if errors.Is(err, ErrFileAlreadyExists) {
+			// A complete fragment file from an earlier attempt blocks this one. Say so and
+			// name it: the caller never created it and has no way to guess it is the obstacle.
+			return FragmentLeftBehindError(err)
+		}
 		if err != nil {
 			return errors.WithMessage(err, "Failed to download file")
 		}
@@ -173,6 +193,9 @@ func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, ro
 
 		// Download raw (without decryption)
 		if err := downloader.downloadAndValidate(ctx, root, tempFile, withProof); err != nil {
+			if errors.Is(err, ErrFileAlreadyExists) {
+				return FragmentLeftBehindError(err)
+			}
 			return errors.WithMessage(err, fmt.Sprintf("Failed to download fragment %d", i))
 		}
 
@@ -288,11 +311,16 @@ func checkFileExistence(filename string, hash common.Hash) error {
 		return errors.WithMessage(err, "Failed to create file merkle tree")
 	}
 
+	// Name the file. Both of these are reported for a fragment's temp file as well as for
+	// the caller's own destination, and without the path the message sends the reader to
+	// the wrong place: they see "File already exists", inspect the output file they asked
+	// for, find nothing wrong with it, and never learn the obstacle is a <root>.temp they
+	// did not create.
 	if tree.Root() == hash {
-		return ErrFileAlreadyExists
+		return errors.WithMessagef(ErrFileAlreadyExists, "%v", filename)
 	}
 
-	return errors.New("File already exists with different hash")
+	return errors.Errorf("File already exists with different hash: %v", filename)
 }
 
 func (downloader *Downloader) downloadFile(ctx context.Context, filename string, root common.Hash, info *node.FileInfo, withProof bool) error {
