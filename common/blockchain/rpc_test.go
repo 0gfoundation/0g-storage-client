@@ -219,3 +219,60 @@ func TestRevertReason(t *testing.T) {
 	})
 
 }
+
+func TestNamedCustomError(t *testing.T) {
+	const testABI = `[
+		{"type":"error","name":"NotEnoughFee","inputs":[]},
+		{"type":"error","name":"BelowLimit","inputs":[{"name":"limit","type":"uint256"},{"name":"who","type":"address"}]}
+	]`
+
+	parsed, err := abi.JSON(strings.NewReader(testABI))
+	assert.NoError(t, err)
+	RegisterCustomErrors(&parsed)
+
+	revertDataFor := func(t *testing.T, name string, args ...any) []byte {
+		t.Helper()
+		abiError, ok := parsed.Errors[name]
+		assert.True(t, ok)
+		packed, err := abiError.Inputs.Pack(args...)
+		assert.NoError(t, err)
+		return append(abiError.ID[:4], packed...)
+	}
+
+	t.Run("names an error that carries no arguments", func(t *testing.T) {
+		assert.Equal(t, "NotEnoughFee()", namedCustomError(revertDataFor(t, "NotEnoughFee")))
+	})
+
+	t.Run("reports the arguments, which carry the detail", func(t *testing.T) {
+		data := revertDataFor(t, "BelowLimit", big.NewInt(42), common.HexToAddress("0x1234"))
+
+		named := namedCustomError(data)
+		assert.Contains(t, named, "BelowLimit")
+		assert.Contains(t, named, "42")
+		assert.Contains(t, named, "0x0000000000000000000000000000000000001234")
+	})
+
+	t.Run("keeps the name when the arguments are malformed", func(t *testing.T) {
+		abiError := parsed.Errors["BelowLimit"]
+		truncated := append(abiError.ID[:4], 0x01, 0x02)
+
+		assert.Equal(t, abiError.Sig, namedCustomError(truncated))
+	})
+
+	t.Run("reports nothing for a selector nobody registered", func(t *testing.T) {
+		assert.Empty(t, namedCustomError([]byte{0xde, 0xad, 0xbe, 0xef}))
+	})
+
+	t.Run("reports nothing for data too short to hold a selector", func(t *testing.T) {
+		assert.Empty(t, namedCustomError([]byte{0x01, 0x02}))
+	})
+
+	t.Run("a registered custom error reaches the reported reason", func(t *testing.T) {
+		err := &rpcprovider.JsonError{
+			Message: "execution reverted",
+			Data:    hexutil.Encode(revertDataFor(t, "NotEnoughFee")),
+		}
+
+		assert.Equal(t, "NotEnoughFee()", revertReasonFromError(err))
+	})
+}
