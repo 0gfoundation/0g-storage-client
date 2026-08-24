@@ -413,8 +413,10 @@ func (c *Client) downloadPlainFragments(ctx context.Context, roots []string, fil
 		if err != nil {
 			return err
 		}
+		// A fragment already complete at this path is reused rather than failing the whole
+		// download - see transfer.Downloader.downloadPlainFragments.
 		err = downloader.Download(ctx, root, tempFile, withProof)
-		if err != nil {
+		if err != nil && !errors.Is(err, transfer.ErrFileAlreadyExists) {
 			return errors.WithMessage(err, "Failed to download file")
 		}
 		inFile, err := os.Open(tempFile)
@@ -458,8 +460,9 @@ func (c *Client) downloadEncryptedFragments(ctx context.Context, roots []string,
 		if err != nil {
 			return err
 		}
+		// A fragment already complete at this path is reused - see above.
 		err = downloader.Download(ctx, root, tempFile, withProof)
-		if err != nil {
+		if err != nil && !errors.Is(err, transfer.ErrFileAlreadyExists) {
 			return errors.WithMessage(err, fmt.Sprintf("Failed to download fragment %d", i))
 		}
 

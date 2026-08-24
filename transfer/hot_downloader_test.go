@@ -752,3 +752,65 @@ func mustNotBeContacted(t *testing.T, what string) *httptest.Server {
 
 	return server
 }
+
+// A multi-fragment download that fails partway leaves completed fragments at their temp
+// paths. On a retry the real Downloader reports those as ErrFileAlreadyExists, having
+// recomputed and matched their merkle root. Treating that as fatal made the retry fail
+// outright, so the caller had to work out which temp files to delete by hand;
+// download_dir has always tolerated it for directory entries.
+func TestHotDownloader_DownloadFragments_ReusesAlreadyCompletedFragment(t *testing.T) {
+	chdirTemp(t)
+
+	router := newTestRouter(t, "") // 404 = cache miss, so the fallback is consulted
+	defer router.Close()
+
+	reused := []byte("fragment completed by an earlier attempt")
+	calls := 0
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(_ context.Context, _, filename string, _ bool) error {
+			calls++
+			if err := os.WriteFile(filename, reused, 0644); err != nil {
+				return err
+			}
+			// Wrapped exactly as downloadAndValidate reports it, so this also covers the
+			// errors.Is unwrapping.
+			return errors.WithMessage(ErrFileAlreadyExists, "Failed to check file existence")
+		}},
+	)
+
+	roots := []string{"0x1111", "0x2222"}
+	require.NoError(t, downloader.DownloadFragments(context.Background(), roots, "output.dat", false),
+		"an already-completed fragment must be reused, not treated as a failure")
+
+	assert.Equal(t, len(roots), calls)
+
+	data, err := os.ReadFile("output.dat")
+	require.NoError(t, err)
+	assert.Equal(t, append(append([]byte(nil), reused...), reused...), data,
+		"the reused fragments must still be concatenated into the output")
+}
+
+// A leftover whose content does not match the requested root reports a different error
+// and must stay fatal.
+func TestHotDownloader_DownloadFragments_DifferentHashStaysFatal(t *testing.T) {
+	chdirTemp(t)
+
+	router := newTestRouter(t, "")
+	defer router.Close()
+
+	downloader := NewHotDownloader(
+		node.NewHotRouterClient(router.URL, testChainID),
+		testKey(t),
+		&mockFallbackDownloader{downloadFunc: func(context.Context, string, string, bool) error {
+			return errors.New("File already exists with different hash")
+		}},
+	)
+
+	err := downloader.DownloadFragments(context.Background(), []string{"0x1111"}, "output.dat", false)
+
+	require.Error(t, err, "a mismatched leftover must not be silently accepted")
+	assert.Contains(t, err.Error(), "different hash")
+}

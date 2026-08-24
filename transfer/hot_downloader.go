@@ -165,7 +165,10 @@ func (d *HotDownloader) downloadPlainFragments(ctx context.Context, roots []stri
 			} else {
 				d.logger.WithField("fragment", i).Info("Fragment not in hot storage, falling back")
 			}
-			if err := d.fallback.Download(ctx, root, tempFile, withProof); err != nil {
+			// A fragment already complete at this path is reused rather than failing the
+			// download - see Downloader.downloadPlainFragments.
+			if err := d.fallback.Download(ctx, root, tempFile, withProof); err != nil &&
+				!errors.Is(err, ErrFileAlreadyExists) {
 				return errors.WithMessage(err, fmt.Sprintf("failed to download fragment %d", i))
 			}
 		}
@@ -240,7 +243,10 @@ func (d *HotDownloader) downloadFragmentData(ctx context.Context, root string, i
 			d.logger.WithField("fragment", index).Info("Fragment not in hot storage, falling back")
 		}
 		tempFile := fmt.Sprintf("%v.temp", root)
-		if err := d.fallback.Download(ctx, root, tempFile, withProof); err != nil {
+		// A fragment already complete at this path is reused - see
+		// Downloader.downloadPlainFragments.
+		if err := d.fallback.Download(ctx, root, tempFile, withProof); err != nil &&
+			!errors.Is(err, ErrFileAlreadyExists) {
 			return nil, errors.WithMessage(err, fmt.Sprintf("failed to download fragment %d", index))
 		}
 		fragmentData, err := os.ReadFile(tempFile)

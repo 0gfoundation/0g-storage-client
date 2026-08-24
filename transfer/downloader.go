@@ -131,8 +131,13 @@ func (downloader *Downloader) downloadPlainFragments(ctx context.Context, roots 
 
 	for _, root := range roots {
 		tempFile := fmt.Sprintf("%v.temp", root)
+		// A fragment already complete at its temp path - left by an earlier attempt that
+		// failed later on - is reported as ErrFileAlreadyExists by checkFileExistence, which
+		// recomputes and matches its merkle root. Reuse it rather than failing the whole
+		// download, as download_dir already does for directory entries. A leftover with
+		// different content reports a different-hash error and stays fatal.
 		err := downloader.Download(ctx, root, tempFile, withProof)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrFileAlreadyExists) {
 			return errors.WithMessage(err, "Failed to download file")
 		}
 		inFile, err := os.Open(tempFile)
@@ -171,8 +176,10 @@ func (downloader *Downloader) downloadEncryptedFragments(ctx context.Context, ro
 	for i, root := range roots {
 		tempFile := fmt.Sprintf("%v.temp", root)
 
-		// Download raw (without decryption)
-		if err := downloader.downloadAndValidate(ctx, root, tempFile, withProof); err != nil {
+		// Download raw (without decryption). A fragment already complete at this path is
+		// reused - see downloadPlainFragments.
+		if err := downloader.downloadAndValidate(ctx, root, tempFile, withProof); err != nil &&
+			!errors.Is(err, ErrFileAlreadyExists) {
 			return errors.WithMessage(err, fmt.Sprintf("Failed to download fragment %d", i))
 		}
 
