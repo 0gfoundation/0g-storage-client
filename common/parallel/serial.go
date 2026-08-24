@@ -4,6 +4,8 @@ import (
 	"context"
 	"runtime"
 	"sync"
+
+	"github.com/pkg/errors"
 )
 
 func Serial(ctx context.Context, parallelizable Interface, tasks int, option ...SerialOption) error {
@@ -15,6 +17,16 @@ func Serial(ctx context.Context, parallelizable Interface, tasks int, option ...
 	if len(option) > 0 {
 		opt = option[0]
 	}
+
+	// Reject negative options rather than proceeding with them. Routines < 0 survived
+	// Normalize, which only substituted a default for exactly 0, and then started no
+	// workers at all - so collect waited forever for results nobody was producing. With
+	// Window also negative the channel length went negative too, and make(chan) panics
+	// on that. Surfacing the caller's mistake beats hanging or crashing on it.
+	if opt.Routines < 0 || opt.Window < 0 {
+		return errors.Errorf("negative parallel option: routines = %v, window = %v", opt.Routines, opt.Window)
+	}
+
 	opt.Normalize(tasks)
 
 	channelLen := max(opt.Routines, opt.Window)
@@ -114,8 +126,9 @@ type SerialOption struct {
 }
 
 func (opt *SerialOption) Normalize(tasks int) {
-	// 0 < routines <= tasks
-	if opt.Routines == 0 {
+	// 0 < routines <= tasks. Non-positive means "unset", so substitute the default:
+	// leaving it at 0 or below would start no workers at all.
+	if opt.Routines <= 0 {
 		opt.Routines = runtime.GOMAXPROCS(0)
 	}
 
