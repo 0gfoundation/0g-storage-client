@@ -92,8 +92,10 @@ func TestRevertReasonFromError(t *testing.T) {
 		assert.Contains(t, reason, "0xdeadbeef", "the raw data is the only clue left, so it must survive")
 	})
 
-	t.Run("falls back for an error that is not from the RPC layer", func(t *testing.T) {
-		assert.Equal(t, "connection refused", revertReasonFromError(errors.New("connection refused")))
+	t.Run("reports nothing for an error that is not from the RPC layer", func(t *testing.T) {
+		// "Transaction execution failed, connection refused" would blame the
+		// chain for the replay's own transport problem.
+		assert.Empty(t, revertReasonFromError(errors.New("connection refused")))
 	})
 }
 
@@ -275,4 +277,42 @@ func TestNamedCustomError(t *testing.T) {
 
 		assert.Equal(t, "NotEnoughFee()", revertReasonFromError(err))
 	})
+}
+
+// A dead node or cancelled context fails at the TransactionByHash gate, which
+// already returns "" - these pin that the gate keeps doing its job.
+func TestRevertReason_TransportFailureIsNotAReason(t *testing.T) {
+	client, err := NewWeb3("http://127.0.0.1:1", testKey) // nothing listens here
+	assert.NoError(t, err)
+	defer client.Close()
+
+	reason := revertReason(context.Background(), client, [32]byte{0x11}, 112)
+	assert.Empty(t, reason, "a transport error is about the replay, not the transaction")
+}
+
+func TestRevertReason_CancelledContextIsNotAReason(t *testing.T) {
+	client := stubNode(t, true, func() (string, *rpcprovider.JsonError) {
+		return "0x", nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	assert.Empty(t, revertReason(ctx, client, [32]byte{0x11}, 112))
+}
+
+// The window the gate does NOT cover: TransactionByHash succeeds, then the
+// node refuses eth_call itself. RPC gateways that whitelist methods do exactly
+// this. The refusal is about the replay, not the transaction, so reporting it
+// as the revert reason would be a confidently wrong diagnosis.
+func TestRevertReason_MethodNotFoundIsNotAReason(t *testing.T) {
+	client := stubNode(t, true, func() (string, *rpcprovider.JsonError) {
+		return "", &rpcprovider.JsonError{
+			Code:    -32601,
+			Message: "the method eth_call does not exist/is not available",
+		}
+	})
+
+	assert.Empty(t, revertReason(context.Background(), client, [32]byte{0x11}, 112),
+		"a node that cannot replay has said nothing about why the transaction failed")
 }
