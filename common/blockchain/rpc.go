@@ -199,8 +199,9 @@ func revertReason(ctx context.Context, client *web3go.Client, txHash common.Hash
 
 	// Replay in the block that contains the transaction, not in its parent. A
 	// revert is atomic, so the block's state holds none of this transaction's
-	// effects and is what it actually ran against - while the block context,
-	// number and timestamp included, matches only here. Replaying in the parent
+	// contract-visible effects - only its nonce bump and fee deduction, which
+	// eth_call does not check - while the block context, number and timestamp
+	// included, matches only here. Replaying in the parent
 	// would silently answer a different question, which is what a condition
 	// tied to block height would turn into a false negative.
 	block := types.BlockNumberOrHashWithNumber(types.NewBlockNumber(int64(blockNumber)))
@@ -230,10 +231,29 @@ func revertReason(ctx context.Context, client *web3go.Client, txHash common.Hash
 // eth_call. Nodes report it as ABI-encoded revert data on the JSON-RPC error;
 // whatever cannot be decoded falls back to the node's own message, which is
 // still more than the caller had.
+//
+// The one thing this must never do is let the diagnostic's own failure read as
+// the diagnosis: a replay that died in transport, or that the node refused to
+// run at all, has said nothing about why the transaction failed. Those return
+// "" so the caller reports the bare failure. What remains is the node talking
+// about the execution - imperfectly, since a message like "missing trie node"
+// from a pruned peer also lands here, but discarding every undecodable message
+// would silence genuine verdicts such as "out of gas".
 func revertReasonFromError(err error) string {
 	var jsonErr *rpcprovider.JsonError
 	if !errors.As(err, &jsonErr) {
-		return err.Error()
+		// Transport failure, timeout: the replay never reached an EVM.
+		logrus.WithError(err).Debug("Cannot diagnose the revert: replay failed before reaching the node")
+		return ""
+	}
+
+	switch jsonErr.Code {
+	case -32700, -32600, -32601, -32602:
+		// The node rejected the request itself - eth_call unsupported or
+		// malformed - which is a statement about the replay, not the
+		// transaction. Gateways that whitelist methods answer exactly this way.
+		logrus.WithError(jsonErr).Debug("Cannot diagnose the revert: node rejected the replay request")
+		return ""
 	}
 
 	data, ok := jsonErr.Data.(string)
